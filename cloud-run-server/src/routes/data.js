@@ -40,14 +40,17 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // We know it's safe and formatted correctly because of Joi
         const data = req.body;
 
-        log(`Raw data received: ${JSON.stringify(data)}`);
-        log(`Received data from device ${data.device_id} at ${new Date(data.timestamp * 1000).toISOString()}`);
-        log(`Temperature: min=${data.temperature.min}°C, max=${data.temperature.max}°C, avg=${data.temperature.avg}°C`);
-        log(`Humidity: min=${data.humidity.min}%, max=${data.humidity.max}%, avg=${data.humidity.avg}%`);
-        log(`Light (raw): min=${data.light_raw.min}, max=${data.light_raw.max}, avg=${data.light_raw.avg}`);
-        log(`Motion detected: ${data.motion_detected ? 'Yes' : 'No'}`);
-        log(`Window minutes: ${data.window_minutes}`);
-        log('----------------------------------------');
+        console.log(`Raw data received: ${JSON.stringify(data)}`);
+        console.log('----------------------------------------');
+        console.log(`Raw headers received: ${JSON.stringify(req.headers)}`);
+        console.log('----------------------------------------');
+        console.log(`Received data from device ${data.device_id} at ${new Date(data.timestamp * 1000).toISOString()}`);
+        console.log(`Temperature: min=${data.temperature.min}°C, max=${data.temperature.max}°C, avg=${data.temperature.avg}°C`);
+        console.log(`Humidity: min=${data.humidity.min}%, max=${data.humidity.max}%, avg=${data.humidity.avg}%`);
+        console.log(`Light (raw): min=${data.light_raw.min}, max=${data.light_raw.max}, avg=${data.light_raw.avg}`);
+        console.log(`Motion detected: ${data.motion_detected ? 'Yes' : 'No'}`);
+        console.log(`Window minutes: ${data.window_minutes}`);
+        console.log('----------------------------------------');
 
         // Save the reading to Firestore
         // This persists our historical data for later analysis

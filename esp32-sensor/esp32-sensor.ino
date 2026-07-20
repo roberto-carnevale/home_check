@@ -172,6 +172,12 @@ void setup() {
         Serial.println("[MODE] LOCAL server selected (GPIO19 GND)");
     }
 
+    Serial.print("[HTTP] Target: ");
+    Serial.print(host);
+    Serial.print(":");
+    Serial.print(port);
+    Serial.println(SERVER_PATH);
+
     // Connect to the selected WiFi network
     connectWiFi();
 

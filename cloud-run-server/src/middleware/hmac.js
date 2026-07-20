@@ -62,6 +62,11 @@ module.exports = function verifyHMAC(req, res, next) {
     // This key must match the one flashed on the ESP32
     const secret = process.env.HMAC_SECRET_KEY || 'default_secret';
 
+    if (!secret) {
+        console.error('HMAC secret key is not set in environment variables');
+        return res.status(500).json({ error: 'Server misconfiguration' });
+    }
+
     // Compute the expected HMAC-SHA256 signature
     // We use the secret to sign the stringToSign, outputting as hex
     const expectedSignature = crypto

@@ -113,6 +113,7 @@ bool HttpClient::postJson(const String& jsonBody, unsigned long timestampUnix) {
             return false;
         }
         secureClient->setCACert(_rootCa);
+        secureClient->setHandshakeTimeout(30);
         String url = String("https://") + _host + ":" + String(_port) + _path;
         Serial.print("[HTTP] Connecting to: ");
         Serial.println(url);
@@ -154,21 +155,27 @@ bool HttpClient::postJson(const String& jsonBody, unsigned long timestampUnix) {
     }
 
     // Add headers.
-    // Sending an explicit Content-Length helps upstream proxies and servers
-    // treat the body as complete instead of truncating it.
     http.addHeader("Content-Type", "application/json");
-    http.addHeader("Content-Length", String(bodyLength));
     http.addHeader("X-Timestamp", tsStr);
     http.addHeader("X-Signature", signature);
+
+    http.setTimeout(15000);
+    http.setReuse(false);
 
     Serial.print("[HTTP] Body length: ");
     Serial.println(bodyLength);
 
     // Execute POST request with body.
-    int httpCode = http.POST((uint8_t*)jsonBody.c_str(), bodyLength);
+    // The String overload is more reliable on the ESP32 core than the raw-byte
+    // overload and gives us a better chance of getting a real HTTP error code.
+    int httpCode = http.POST(jsonBody);
 
     Serial.print("[HTTP] POST Result Code: ");
     Serial.println(httpCode);
+    if (httpCode < 0) {
+        Serial.print("[HTTP] POST error: ");
+        Serial.println(http.errorToString(httpCode));
+    }
 
     bool success = false;
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
