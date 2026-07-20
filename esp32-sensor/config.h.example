@@ -1,0 +1,53 @@
+// config.h.example
+// Configuration template for the ESP32 sensor project.
+// Copy this file to 'config.h' and fill in your actual settings.
+// It includes network, server, device, and timing configuration.
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// WiFi Configuration
+// Set these to match your local network
+#define WIFI_SSID     "your-wifi-ssid"
+#define WIFI_PASSWORD "your-wifi-password"
+
+// Server Configuration
+// Remote endpoint details for the Cloud Run instance
+#define SERVER_HOST_REMOTE  "your-cloud-run-host.run.app"
+#define SERVER_PORT_REMOTE  443
+// Local endpoint for development/testing
+#define SERVER_HOST_LOCAL   "192.168.1.100"
+#define SERVER_PORT_LOCAL   8080
+// Shared API path
+#define SERVER_PATH         "/api/data"
+
+// Device Identification
+// Unique ID for this specific sensor node
+#define DEVICE_ID     "esp32-home-01"
+
+// Hardware Pin Definitions
+// DHT sensor pin and type (DHT22 is compatible with AM2302)
+#define DHT_PIN       4
+#define DHT_TYPE      DHT22
+// LDR (Light Dependent Resistor) analog input pin
+#define LDR_PIN       34
+// SR505 PIR Motion Sensor digital input pin
+#define PIR_PIN       14
+// Manual test button input pin (active low, using internal pull-up)
+#define BUTTON_PIN    13
+// Mode switch pin: HIGH/floating = remote server, GND = local server
+#define MODE_SWITCH_PIN  19
+
+// Timing and Interval Definitions
+// 1 minute between sensor samples (in milliseconds)
+#define SAMPLE_INTERVAL_MS   60000UL
+// POST data to the server every 5 minutes
+#define REPORT_INTERVAL_MIN  5
+// Calculate rolling statistics over the last 30 minutes
+#define ROLLING_WINDOW       30
+
+// Include sensitive configuration at the bottom
+// This keeps secrets separate from general config
+#include "secrets.h"
+
+#endif // CONFIG_H

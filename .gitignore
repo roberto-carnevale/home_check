@@ -1,0 +1,26 @@
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+esp32-sensor/config.h
+esp32-sensor/secrets.h
+cloud-run-server/.env
+cloud-run-server/.env.local
+vapid.txt
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+cloud-run-server/node_modules/
+
+# ─── Build artefacts ─────────────────────────────────────────────────────────
+*.bin
+*.elf
+*.hex
+*.map
+build/
+coverage/
+dist/
+
+# ─── OS junk ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log

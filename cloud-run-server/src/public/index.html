@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Standard meta tags for character encoding and responsive viewport -->
+    <!-- Viewport is crucial for the PWA to look good on mobile devices -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Title of the dashboard application -->
+    <!-- This also appears when the PWA is installed -->
+    <title>Home Check Dashboard</title>
+
+    <!-- Link to the Web App Manifest -->
+    <!-- This allows the browser to install the app as a PWA -->
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- Preconnect to Google Fonts for faster font loading -->
+    <!-- This improves the Largest Contentful Paint (LCP) metric -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!-- Load the Inter font from Google Fonts -->
+    <!-- Inter is highly legible and provides a clean, modern aesthetic -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Embed CSS directly for simplicity and performance -->
+    <!-- A dark theme is implemented using CSS variables and slate/indigo colors -->
+    <style>
+        :root {
+            --bg-color: #0f172a; /* Slate 900 */
+            --card-bg: #1e293b; /* Slate 800 */
+            --text-main: #f8fafc; /* Slate 50 */
+            --text-muted: #94a3b8; /* Slate 400 */
+            --accent: #6366f1; /* Indigo 500 */
+            --accent-hover: #4f46e5; /* Indigo 600 */
+        }
+
+        /* Apply global box-sizing and font family */
+        /* This ensures consistent layout and typography across all elements */
+        * {
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Style the body to have a dark background and fill the screen */
+        /* Margin 0 prevents unwanted scrollbars */
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        /* Container for the dashboard content */
+        /* Restricts maximum width for readability on large screens */
+        .container {
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        /* Header section styling */
+        /* Flexbox ensures the title and button are nicely aligned */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        /* Style for the title text */
+        /* Removes default margins for cleaner alignment */
+        h1 {
+            margin: 0;
+            font-weight: 600;
+        }
+
+        /* Style for the subscribe button */
+        /* Uses the accent color with a subtle transition for hover effects */
+        button {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        /* Hover state for the button */
+        /* Slightly darkens the background color */
+        button:hover {
+            background-color: var(--accent-hover);
+        }
+
+        /* Status bar showing last updated time and device ID */
+        /* Muted text color indicates secondary information */
+        .status {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 24px;
+        }
+
+        /* Grid layout for the charts */
+        /* Uses CSS Grid to automatically place cards side by side on wide screens */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+
+        /* Card styling for each chart */
+        /* Soft background and rounded corners provide a modern 'card' look */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Title within each chart card */
+        /* Centered and appropriately spaced */
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            text-align: center;
+        }
+
+        /* Container for the canvas element */
+        /* Ensures the chart scales correctly within its card */
+        .chart-container {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+
+        /* Styling for the PIR Alarm List */
+        .event-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .event-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid #334155;
+            font-size: 0.9rem;
+        }
+        .event-item:last-child {
+            border-bottom: none;
+        }
+        .event-time {
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .event-meta {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .event-status {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+        .section-title {
+            margin-top: 32px;
+            margin-bottom: 16px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid var(--card-bg);
+            padding-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Main wrapper for all dashboard content -->
+    <!-- Controls max width and centering -->
+    <div class="container">
+        <!-- Header containing the title and action button -->
+        <!-- Flex layout keeps them aligned -->
+        <header>
+            <h1>Home Check</h1>
+            <button id="subscribeBtn">Subscribe to Notifications</button>
+        </header>
+
+        <!-- Status indicator for metadata -->
+        <!-- Updated via JavaScript when new SSE data arrives -->
+        <div class="status" id="statusText">Waiting for data...</div>
+
+        <!-- Grid container for the three charts -->
+        <!-- Responsive layout adapts to screen size -->
+        <div class="charts-grid">
+            <!-- Temperature chart card -->
+            <!-- Displays the temperature line graph -->
+            <div class="card">
+                <h2>Temperature (°C)</h2>
+                <div class="chart-container">
+                    <canvas id="tempChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Humidity chart card -->
+            <!-- Displays the humidity line graph -->
+            <div class="card">
+                <h2>Humidity (%)</h2>
+                <div class="chart-container">
+                    <canvas id="humidityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Light chart card -->
+            <!-- Displays the raw light sensor line graph -->
+            <div class="card">
+                <h2>Light (Raw)</h2>
+                <div class="chart-container">
+                    <canvas id="lightChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- PIR motion detection events log -->
+        <h2 class="section-title">PIR Motion Events Log</h2>
+        <div class="card" style="margin-top: 16px; width: 100%;">
+            <h2>Latest 10 PIR Activations</h2>
+            <ul class="event-list" id="pirEventList">
+                <li class="event-item" style="justify-content: center; color: var(--text-muted);">
+                    Loading events...
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Load Chart.js from CDN -->
+    <!-- This powerful library renders our line charts on canvas elements -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Load our custom application logic -->
+    <!-- This script handles SSE, charting updates, and Push subscriptions -->
+    <script type="module" src="/app.js"></script>
+</body>
+</html>

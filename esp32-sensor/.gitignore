@@ -1,0 +1,22 @@
+# ─── Secrets — NEVER commit these ───────────────────────────────────────────
+# Copy config.h.example → config.h and fill in your values
+config.h
+
+# Copy secrets.h.example → secrets.h and fill in your values
+secrets.h
+
+# ─── Arduino IDE build artefacts ─────────────────────────────────────────────
+# Compiled binary output
+*.bin
+*.elf
+*.hex
+*.map
+
+# Arduino IDE temp files
+build/
+.arduino15/
+
+# ─── OS junk ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
