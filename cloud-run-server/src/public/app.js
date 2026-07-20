@@ -1,9 +1,7 @@
 // --- VAPID Public Key ---
-// This key must match the VAPID_PUBLIC_KEY environment variable on the server.
-// Replace this string with your actual base64url encoded public key.
-if (process.env.VAPID_PUBLIC_KEY) {
-    const PUBLIC_VAPID_KEY = process.env.VAPID_PUBLIC_KEY;
-}
+// This value is optional for the dashboard and is only used when the user
+// subscribes to push notifications from the browser.
+const PUBLIC_VAPID_KEY = (typeof window !== 'undefined' && window.__VAPID_PUBLIC_KEY) || '';
 
 // Array to store active PIR events locally
 let activePirEvents = [];
@@ -32,13 +30,29 @@ function urlBase64ToUint8Array(base64String) {
 // --- Chart Setup ---
 // We define common configuration options for all our Chart.js instances
 // This ensures a consistent look and feel across the dashboard
+const HOUR_MS = 60 * 60 * 1000;
+const HISTORY_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+const formatHourLabel = (timestamp) => new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+});
+
 const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
     animation: { duration: 0 }, // Disable animation for snappy live updates
     scales: {
         x: {
-            display: false // Hide the x-axis labels to keep the UI clean
+            type: 'linear',
+            min: Date.now() - HISTORY_WINDOW_MS,
+            max: Date.now(),
+            ticks: {
+                color: '#94a3b8',
+                stepSize: HOUR_MS,
+                callback: (value) => formatHourLabel(value)
+            },
+            grid: { color: '#334155' }
         },
         y: {
             // Ensure the Y axis scales properly with grid lines
@@ -58,9 +72,8 @@ const commonOptions = {
 const createChart = (ctx, color) => new Chart(ctx, {
     type: 'line',
     data: {
-        labels: [], // Time labels will go here
         datasets: [{
-            data: [], // Actual sensor data points
+            data: [], // Actual sensor data points with x/y coordinates
             borderColor: color, // The line color
             backgroundColor: color + '33', // The fill color (with transparency)
             fill: true, // Fill the area under the line
@@ -84,16 +97,17 @@ const MAX_POINTS = 600;
 
 // Helper function to update a specific chart with a new data point
 // It pushes the new value and shifts old values out if necessary
-const updateChart = (chart, label, value) => {
-    chart.data.labels.push(label);
-    chart.data.datasets[0].data.push(value);
+const updateChart = (chart, timestamp, value) => {
+    chart.data.datasets[0].data.push({ x: timestamp, y: value });
 
     // If we exceed MAX_POINTS, remove the oldest data point
     // This creates a scrolling effect over time
-    if (chart.data.labels.length > MAX_POINTS) {
-        chart.data.labels.shift();
+    if (chart.data.datasets[0].data.length > MAX_POINTS) {
         chart.data.datasets[0].data.shift();
     }
+
+    chart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
+    chart.options.scales.x.max = Date.now();
 
     // Tell Chart.js to re-render with the new data
     chart.update();
@@ -134,18 +148,20 @@ async function fetchAndInitData() {
         // Populate historical readings into the charts
         if (data.history && data.history.length > 0) {
             data.history.forEach(reading => {
-                const label = new Date(reading.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                
+                const timestamp = reading.timestamp * 1000;
+
                 // Add points chronologically
-                tempChart.data.labels.push(label);
-                tempChart.data.datasets[0].data.push(reading.temperature.avg);
-
-                humidityChart.data.labels.push(label);
-                humidityChart.data.datasets[0].data.push(reading.humidity.avg);
-
-                lightChart.data.labels.push(label);
-                lightChart.data.datasets[0].data.push(reading.light_raw.avg);
+                tempChart.data.datasets[0].data.push({ x: timestamp, y: reading.temperature.avg });
+                humidityChart.data.datasets[0].data.push({ x: timestamp, y: reading.humidity.avg });
+                lightChart.data.datasets[0].data.push({ x: timestamp, y: reading.light_raw.avg });
             });
+
+            tempChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
+            tempChart.options.scales.x.max = Date.now();
+            humidityChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
+            humidityChart.options.scales.x.max = Date.now();
+            lightChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
+            lightChart.options.scales.x.max = Date.now();
 
             // Update charts after bulk inserts
             tempChart.update();
@@ -196,9 +212,10 @@ eventSource.onmessage = (event) => {
 
     // Update all three charts with the new average values
     // We use the 'avg' property as it's the most stable metric
-    updateChart(tempChart, timeLabel, data.temperature.avg);
-    updateChart(humidityChart, timeLabel, data.humidity.avg);
-    updateChart(lightChart, timeLabel, data.light_raw.avg);
+    const timestamp = data.timestamp * 1000;
+    updateChart(tempChart, timestamp, data.temperature.avg);
+    updateChart(humidityChart, timestamp, data.humidity.avg);
+    updateChart(lightChart, timestamp, data.light_raw.avg);
 
     // If PIR motion was detected in this reading, dynamically add it to the log list
     if (data.motion_detected === true) {

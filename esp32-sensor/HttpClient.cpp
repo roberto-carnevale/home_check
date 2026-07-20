@@ -98,43 +98,9 @@ String HttpClient::computeSignature(const String& timestamp, const String& bodyH
 // postJson implementation
 // Sends signed POST request over HTTPS or plain HTTP (when no CA cert)
 bool HttpClient::postJson(const String& jsonBody, unsigned long timestampUnix) {
-    HTTPClient http;
-    bool begun = false;
-
-    // Choose secure or plain connection based on whether a CA cert was provided
-    WiFiClientSecure *secureClient = nullptr;
-    WiFiClient *plainClient = nullptr;
-
-    if (_rootCa) {
-        // TLS mode for remote server
-        secureClient = new WiFiClientSecure;
-        if (!secureClient) {
-            Serial.println("[HTTP] Unable to create secure client");
-            return false;
-        }
-        secureClient->setCACert(_rootCa);
-        secureClient->setHandshakeTimeout(30);
-        String url = String("https://") + _host + ":" + String(_port) + _path;
-        Serial.print("[HTTP] Connecting to: ");
-        Serial.println(url);
-        begun = http.begin(*secureClient, url);
-    } else {
-        // Plain HTTP mode for local server
-        plainClient = new WiFiClient;
-        if (!plainClient) {
-            Serial.println("[HTTP] Unable to create client");
-            return false;
-        }
-        String url = String("http://") + _host + ":" + String(_port) + _path;
-        Serial.print("[HTTP] Connecting to: ");
-        Serial.println(url);
-        begun = http.begin(*plainClient, url);
-    }
-
-    if (!begun) {
-        Serial.println("[HTTP] Unable to connect to server");
-        delete secureClient;
-        delete plainClient;
+    const size_t bodyLength = jsonBody.length();
+    if (bodyLength == 0) {
+        Serial.println("[HTTP] Empty payload, skipping request");
         return false;
     }
 
@@ -145,50 +111,100 @@ bool HttpClient::postJson(const String& jsonBody, unsigned long timestampUnix) {
     // Compute final signature
     String signature = computeSignature(tsStr, bodyHash);
 
-    const size_t bodyLength = jsonBody.length();
-    if (bodyLength == 0) {
-        Serial.println("[HTTP] Empty payload, skipping request");
+    Serial.print("[HTTP] Target: ");
+    Serial.print(_host);
+    Serial.print(":");
+    Serial.print(_port);
+    Serial.println(_path);
+
+    IPAddress resolvedIp;
+    if (!WiFi.hostByName(_host, resolvedIp)) {
+        Serial.println("[HTTP] DNS resolution failed for target host");
+        return false;
+    }
+    Serial.print("[HTTP] Resolved host to: ");
+    Serial.println(resolvedIp);
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        HTTPClient http;
+        WiFiClientSecure *secureClient = nullptr;
+        WiFiClient *plainClient = nullptr;
+        bool begun = false;
+
+        if (_rootCa) {
+            secureClient = new WiFiClientSecure;
+            if (!secureClient) {
+                Serial.println("[HTTP] Unable to create secure client");
+                return false;
+            }
+            secureClient->setHandshakeTimeout(30);
+            secureClient->setCACert(_rootCa);
+            if (attempt == 1) {
+                secureClient->setInsecure();
+                Serial.println("[HTTP] Retrying without certificate verification...");
+            }
+            String url = String("https://") + _host + ":" + String(_port) + _path;
+            Serial.print("[HTTP] Attempt ");
+            Serial.print(attempt + 1);
+            Serial.print(" connecting to: ");
+            Serial.println(url);
+            begun = http.begin(*secureClient, url);
+        } else {
+            plainClient = new WiFiClient;
+            if (!plainClient) {
+                Serial.println("[HTTP] Unable to create client");
+                return false;
+            }
+            String url = String("http://") + _host + ":" + String(_port) + _path;
+            Serial.print("[HTTP] Attempt ");
+            Serial.print(attempt + 1);
+            Serial.print(" connecting to: ");
+            Serial.println(url);
+            begun = http.begin(*plainClient, url);
+        }
+
+        if (!begun) {
+            Serial.println("[HTTP] Unable to connect to server");
+            delete secureClient;
+            delete plainClient;
+            return false;
+        }
+
+        http.addHeader("Content-Type", "application/json");
+        http.addHeader("X-Timestamp", tsStr);
+        http.addHeader("X-Signature", signature);
+
+        http.setTimeout(15000);
+        http.setReuse(false);
+
+        Serial.print("[HTTP] Body length: ");
+        Serial.println(bodyLength);
+
+        int httpCode = http.POST(jsonBody);
+        Serial.print("[HTTP] POST Result Code: ");
+        Serial.println(httpCode);
+        if (httpCode < 0) {
+            Serial.print("[HTTP] POST error: ");
+            Serial.println(http.errorToString(httpCode));
+        }
+
+        bool success = false;
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
+            success = true;
+        } else if (httpCode >= 0) {
+            String payload = http.getString();
+            Serial.print("[HTTP] Error payload: ");
+            Serial.println(payload);
+        }
+
         http.end();
         delete secureClient;
         delete plainClient;
-        return false;
+
+        if (success) {
+            return true;
+        }
     }
 
-    // Add headers.
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-Timestamp", tsStr);
-    http.addHeader("X-Signature", signature);
-
-    http.setTimeout(15000);
-    http.setReuse(false);
-
-    Serial.print("[HTTP] Body length: ");
-    Serial.println(bodyLength);
-
-    // Execute POST request with body.
-    // The String overload is more reliable on the ESP32 core than the raw-byte
-    // overload and gives us a better chance of getting a real HTTP error code.
-    int httpCode = http.POST(jsonBody);
-
-    Serial.print("[HTTP] POST Result Code: ");
-    Serial.println(httpCode);
-    if (httpCode < 0) {
-        Serial.print("[HTTP] POST error: ");
-        Serial.println(http.errorToString(httpCode));
-    }
-
-    bool success = false;
-    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
-        success = true;
-    } else {
-        String payload = http.getString();
-        Serial.print("[HTTP] Error payload: ");
-        Serial.println(payload);
-    }
-
-    // Clean up
-    http.end();
-    delete secureClient;
-    delete plainClient;
-    return success;
+    return false;
 }

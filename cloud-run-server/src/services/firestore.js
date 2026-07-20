@@ -98,36 +98,39 @@ module.exports = {
         // Calculate timestamp threshold in UNIX epoch seconds
         const fortyEightHoursAgo = Math.floor(Date.now() / 1000) - (48 * 60 * 60);
 
-        // Fetch readings newer than 48 hours, ordered chronologically
+        // Firestore does not always have the composite index needed for the
+        // timestamp ordering query on the free-tier project. Fetch a reasonable
+        // window without ordering first, then sort in memory to keep the UI working.
         const snapshot = await db.collection('readings')
             .where('timestamp', '>=', fortyEightHoursAgo)
-            .orderBy('timestamp', 'asc')
             .get();
 
-        // Map documents to clean objects
-        return snapshot.docs.map(doc => doc.data());
+        return snapshot.docs
+            .map(doc => doc.data())
+            .sort((a, b) => a.timestamp - b.timestamp);
     },
 
     // Function to retrieve the latest 10 PIR motion sensor events
     // Ordered descending by timestamp to show the most recent first
     async getLatest10PirEvents() {
-        // Fetch readings where motion_detected was true
+        // Firestore can reject the composite index query here as well, so we
+        // fetch recent matching docs and sort in memory instead.
         const snapshot = await db.collection('readings')
             .where('motion_detected', '==', true)
-            .orderBy('timestamp', 'desc')
-            .limit(10)
             .get();
 
-        // Map documents to clean objects
-        return snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-                device_id: data.device_id,
-                timestamp: data.timestamp,
-                temperature_avg: data.temperature.avg,
-                humidity_avg: data.humidity.avg
-            };
-        });
+        return snapshot.docs
+            .map(doc => {
+                const data = doc.data();
+                return {
+                    device_id: data.device_id,
+                    timestamp: data.timestamp,
+                    temperature_avg: data.temperature.avg,
+                    humidity_avg: data.humidity.avg
+                };
+            })
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 10);
     },
 
     // Function to delete readings older than 30 days (1 month)
