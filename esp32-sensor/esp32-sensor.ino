@@ -26,12 +26,21 @@ HttpClient* httpClient;
 
 // Variables to track scheduling without using blocking delays
 unsigned long lastSampleTime = 0;
+unsigned long lastPirSampleTime = 0;
+unsigned long lastPirReportTime = 0;
 unsigned long lastReportTime = 0;
+const unsigned long PIR_REPORT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 
 // Track button state and last press time for manual test triggers with lockout
 int lastButtonState = HIGH;
 unsigned long lastButtonPressTime = 0;
 const unsigned long BUTTON_LOCKOUT_MS = 2000UL; // 2 seconds lockout to prevent bouncing
+
+// Track PIR toggle button state and runtime enable/disable state
+int lastToggleButtonState = LOW;
+unsigned long lastToggleButtonPressTime = 0;
+const unsigned long PIR_TOGGLE_LOCKOUT_MS = 250UL;
+bool pirEnabled = false;
 
 // Function to connect or reconnect to WiFi
 void connectWiFi() {
@@ -186,6 +195,9 @@ void setup() {
 
     // Configure the manual test button pin using internal pull-up
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(PIR_TOGGLE_PIN, INPUT_PULLUP);
+    pinMode(PIR_LED_PIN, OUTPUT);
+    digitalWrite(PIR_LED_PIN, LOW);
 
     // Instantiate SensorManager with config values
     sensorMgr = new SensorManager(DHT_PIN, LDR_PIN, PIR_PIN, ROLLING_WINDOW);
@@ -207,16 +219,44 @@ void loop() {
         connectWiFi();
     }
 
-    // Check if it's time to take a new sensor sample
+    // Check if it's time to take a new environmental sensor sample
     if (currentMillis - lastSampleTime >= SAMPLE_INTERVAL_MS || lastSampleTime == 0) {
         lastSampleTime = currentMillis;
-        Serial.println("[SENSOR] Taking sample...");
+        Serial.println("[SENSOR] Taking environmental sample...");
         
-        // Read from sensors and store in circular buffer
+        // Read from DHT and LDR and store in circular buffer
         if (sensorMgr->takeSample()) {
-            Serial.println("[SENSOR] Sample successful.");
+            Serial.println("[SENSOR] Environmental sample successful.");
         } else {
-            Serial.println("[SENSOR] Sample failed.");
+            Serial.println("[SENSOR] Environmental sample failed.");
+        }
+    }
+
+    // Toggle PIR monitoring on/off using GPIO27
+    int toggleButtonState = digitalRead(PIR_TOGGLE_PIN);
+    if (toggleButtonState == LOW && lastToggleButtonState == HIGH &&
+        currentMillis - lastToggleButtonPressTime >= PIR_TOGGLE_LOCKOUT_MS) {
+        lastToggleButtonPressTime = currentMillis;
+        pirEnabled = !pirEnabled;
+        Serial.printf("[PIR] Monitoring %s\n", pirEnabled ? "enabled" : "disabled");
+        if (!pirEnabled) {
+            digitalWrite(PIR_LED_PIN, LOW);
+        } else {
+            digitalWrite(PIR_LED_PIN, HIGH);
+        }
+    }
+    lastToggleButtonState = toggleButtonState;
+
+    // Check if it's time to poll the PIR sensor
+    if (pirEnabled && (currentMillis - lastPirSampleTime >= PIR_SAMPLE_INTERVAL_MS || lastPirSampleTime == 0)) {
+        lastPirSampleTime = currentMillis;
+        bool pirTrigger = sensorMgr->takePirSample();
+
+        if (pirTrigger && (lastPirReportTime == 0 || currentMillis - lastPirReportTime >= PIR_REPORT_COOLDOWN_MS)) {
+            Serial.println("[PIR] Triggering immediate report due to active motion.");
+            lastPirReportTime = currentMillis;
+            unsigned long ts = getTimestamp();
+            sendReport(ts);
         }
     }
 

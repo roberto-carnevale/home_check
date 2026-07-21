@@ -46,7 +46,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --region "$REGION" \
     --allow-unauthenticated \
     --update-env-vars ALLOWED_ORIGIN="*" \
-    --update-secrets=HMAC_SECRET_KEY=home-check-hmac-secret:latest,SMTP_PASS=home-check-smtp-pass:latest,VAPID_PRIVATE_KEY=home-check-vapid-private:latest,VAPID_PUBLIC_KEY=home-check-vapid-public:latest,VAPID_SUBJECT=home-check-vapid-subject:latest
+    --update-secrets=HMAC_SECRET_KEY=home-check-hmac-secret:latest,SMTP_PASS=home-check-smtp-pass:latest,VAPID_PRIVATE_KEY=home-check-vapid-private:latest,VAPID_PUBLIC_KEY=home-check-vapid-public:latest,VAPID_SUBJECT=home-check-vapid-subject:latest,ALERT_EMAILS=home-check-alert-emails:latest,SMTP_USER=home-check-smtp-user:latest,SMTP_HOST=home-check-smtp-host:latest,SMTP_PORT=home-check-smtp-port:latest
 
 # Retrieve the final URL of the deployed service
 # We query the service details and format the output as the URL string

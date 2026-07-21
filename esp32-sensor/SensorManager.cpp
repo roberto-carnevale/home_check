@@ -46,7 +46,7 @@ void SensorManager::begin() {
 }
 
 // takeSample() implementation
-// Reads from sensors and places data in circular buffers
+// Reads environmental sensors and places data in circular buffers
 bool SensorManager::takeSample() {
     // Read humidity as a float
     float h = _dht.readHumidity();
@@ -54,14 +54,6 @@ bool SensorManager::takeSample() {
     float t = _dht.readTemperature();
     // Read light level as raw analog value
     float l = (float)analogRead(_ldrPin);
-    // Read digital state of the SR505 PIR motion sensor
-    int pirState = digitalRead(_pirPin);
-
-    // If PIR pin reads HIGH, motion is detected. Keep it sticky until reported.
-    if (pirState == HIGH) {
-        _motionDetected = true;
-        Serial.println("[SENSOR] Motion detected!");
-    }
 
     // Check if DHT readings are valid numbers (not NaN)
     if (isnan(h) || isnan(t)) {
@@ -84,11 +76,26 @@ bool SensorManager::takeSample() {
     }
 
     // Print sampled values to Serial Monitor
-    Serial.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f | PIR: %s\n",
-                  t, h, l, pirState == HIGH ? "ACTIVE" : "idle");
+    Serial.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f\n",
+                  t, h, l);
 
     // Successfully took a sample
     return true;
+}
+
+// takePirSample() implementation
+// Reads the PIR sensor state and marks motion when triggered
+bool SensorManager::takePirSample() {
+    int pirState = digitalRead(_pirPin);
+
+    // If PIR pin reads HIGH, motion is detected. Keep it sticky until reported.
+    if (pirState == HIGH) {
+        _motionDetected = true;
+        Serial.println("[SENSOR] Motion detected!");
+        return true;
+    }
+
+    return false;
 }
 
 // Returns if motion was detected since the last reset

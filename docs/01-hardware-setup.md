@@ -176,8 +176,8 @@ NodeMCU ESP-32S v1.1 (38-pin, viewed from above)
           GPIO32 ──│ [ ] GPIO32          GND [■] ◄─── GND
           GPIO33 ──│ [ ] GPIO33       GPIO19 [■] ◄─── MODE SWITCH
           GPIO25 ──│ [ ] GPIO25       GPIO18 [ ] │
-          GPIO26 ──│ [ ] GPIO26       GPIO05 [ ] │
-          GPIO27 ──│ [ ] GPIO27       GPIO17 [ ] │
+  LED ARM GPIO26 ──│ [■] GPIO26       GPIO05 [ ] │
+  INSERIM GPIO27 ──│ [■] GPIO27       GPIO17 [ ] │
   PIR ──► GPIO14 ──│ [■] GPIO14       GPIO16 [ ] │
           GPIO12 ──│ [ ] GPIO12       GPIO04 [■] ◄─── DHT DATA
              GND ──│ [■] GND          GPIO02 [ ] ─── LED

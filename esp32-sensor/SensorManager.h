@@ -37,9 +37,12 @@ public:
     // Initializes the hardware sensors
     void begin();
 
-    // Takes a sample from all sensors (DHT, LDR, PIR)
-    // Returns true on success, false if DHT read fails
+    // Takes a sample from the environmental sensors (DHT and LDR)
+    // Returns true on success, false if the DHT read fails
     bool takeSample();
+
+    // Takes a sample from the PIR motion sensor and returns true when motion is active
+    bool takePirSample();
 
     // Calculates and returns rolling statistics over the window
     AllStats getStats() const;
