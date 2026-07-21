@@ -2,7 +2,7 @@
 // This makes tests run instantaneously instead of taking 95 minutes
 jest.useFakeTimers();
 
-// Mock the mailer and webpush services
+// Mock the mailer, webpush, and Firestore services
 // We do this to intercept their function calls without sending real emails/pushes
 jest.mock('../src/services/mailer', () => ({
     sendAlert: jest.fn()
@@ -10,11 +10,17 @@ jest.mock('../src/services/mailer', () => ({
 jest.mock('../src/services/webpush', () => ({
     sendPushToAll: jest.fn()
 }));
+jest.mock('../src/services/firestore', () => ({
+    getLatestReading: jest.fn(),
+    getWatchdogStatus: jest.fn(),
+    setWatchdogStatus: jest.fn()
+}));
 
 // Import the mocked dependencies and the watchdog module
 // This allows us to assert that the mocks were called by the watchdog
 const mailer = require('../src/services/mailer');
 const webpush = require('../src/services/webpush');
+const firestore = require('../src/services/firestore');
 const watchdog = require('../src/services/watchdog');
 
 // Define the test suite for the Watchdog Service
@@ -69,5 +75,47 @@ describe('Watchdog Service', () => {
         // Now the second timer should definitely fire
         jest.advanceTimersByTime(50 * 60 * 1000);
         expect(mailer.sendAlert).toHaveBeenCalledTimes(1);
+    });
+
+    // Test case: The scheduler-based check fires an alert when data is stale.
+    it('should alert once for a stale latest reading', async () => {
+        const staleTimestamp = Math.floor(Date.now() / 1000) - (96 * 60);
+        firestore.getLatestReading.mockResolvedValue({ timestamp: staleTimestamp });
+        firestore.getWatchdogStatus.mockResolvedValue(null);
+
+        const result = await watchdog.checkWatchdog();
+
+        expect(mailer.sendAlert).toHaveBeenCalledTimes(1);
+        expect(webpush.sendPushToAll).toHaveBeenCalledTimes(1);
+        expect(firestore.setWatchdogStatus).toHaveBeenCalledWith(expect.objectContaining({
+            lastAlertedReadingTimestamp: staleTimestamp
+        }));
+        expect(result.status).toBe('alerted');
+    });
+
+    it('should not alert again for the same stale reading', async () => {
+        const staleTimestamp = Math.floor(Date.now() / 1000) - (96 * 60);
+        firestore.getLatestReading.mockResolvedValue({ timestamp: staleTimestamp });
+        firestore.getWatchdogStatus.mockResolvedValue({
+            lastAlertedReadingTimestamp: staleTimestamp,
+            lastAlertedAt: Date.now() - 1000
+        });
+
+        const result = await watchdog.checkWatchdog();
+
+        expect(mailer.sendAlert).not.toHaveBeenCalled();
+        expect(webpush.sendPushToAll).not.toHaveBeenCalled();
+        expect(result.status).toBe('already-alerted');
+    });
+
+    it('should not alert when the latest reading is still fresh', async () => {
+        const freshTimestamp = Math.floor(Date.now() / 1000) - (10 * 60);
+        firestore.getLatestReading.mockResolvedValue({ timestamp: freshTimestamp });
+
+        const result = await watchdog.checkWatchdog();
+
+        expect(mailer.sendAlert).not.toHaveBeenCalled();
+        expect(webpush.sendPushToAll).not.toHaveBeenCalled();
+        expect(result.status).toBe('ok');
     });
 });

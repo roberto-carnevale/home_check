@@ -23,6 +23,7 @@ const path = require('path');
 // data.js exports { router, setBroadcast } to avoid a circular dependency
 const { router: dataRouter, setBroadcast } = require('./routes/data');
 const subscribeRoutes = require('./routes/subscribe');
+const watchdogRoutes = require('./routes/watchdog');
 
 // Import the watchdog service
 // This service monitors data freshness and sends alerts if data stops
@@ -121,12 +122,23 @@ app.get('/api/history', async (req, res) => {
     }
 });
 
+// Expose runtime configuration to the frontend
+// The browser needs the VAPID public key to subscribe to push notifications.
+app.get('/api/config', (req, res) => {
+    res.status(200).json({
+        publicVapidKey: process.env.VAPID_PUBLIC_KEY || ''
+    });
+});
+
 // Mount the data route with the rate limiter applied first
 // dataRouter is the Express Router from routes/data.js
 app.use('/api/data', dataLimiter, dataRouter);
 
 // Mount the subscribe route for Web Push subscription registration
 app.use('/api/subscribe', subscribeRoutes);
+
+// Mount the watchdog check endpoint for Cloud Run scheduler polling
+app.use('/api/watchdog', watchdogRoutes);
 
 // Start the Express server
 // Listen on the specified port and log a startup message

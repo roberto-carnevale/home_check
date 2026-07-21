@@ -1,10 +1,26 @@
 // --- VAPID Public Key ---
-// This value is optional for the dashboard and is only used when the user
-// subscribes to push notifications from the browser.
-const PUBLIC_VAPID_KEY = (typeof window !== 'undefined' && window.__VAPID_PUBLIC_KEY) || '';
+// This value is loaded from the server at runtime when the user subscribes.
+let PUBLIC_VAPID_KEY = '';
 
 // Array to store active PIR events locally
 let activePirEvents = [];
+
+const loadPushConfig = async () => {
+    try {
+        const response = await fetch('/api/config');
+        if (!response.ok) {
+            console.warn('Failed to load push config');
+            return;
+        }
+
+        const config = await response.json();
+        PUBLIC_VAPID_KEY = config.publicVapidKey || '';
+    } catch (err) {
+        console.warn('Error loading push config:', err);
+    }
+};
+
+loadPushConfig();
 
 // Utility function to convert the base64 VAPID key to a Uint8Array
 // The push manager requires the applicationServerKey to be in this format
@@ -267,6 +283,10 @@ document.getElementById('subscribeBtn').addEventListener('click', async () => {
 
         // Ask the browser's Push Manager to create a subscription
         // userVisibleOnly ensures we always show a notification when a push arrives
+        if (!PUBLIC_VAPID_KEY) {
+            throw new Error('Push subscription cannot start because VAPID public key is missing');
+        }
+
         const subscription = await register.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
@@ -274,11 +294,16 @@ document.getElementById('subscribeBtn').addEventListener('click', async () => {
 
         // Send the resulting subscription object to our Node.js server
         // The server will save it to Firestore for future use
-        await fetch('/api/subscribe', {
+        const subscribeResponse = await fetch('/api/subscribe', {
             method: 'POST',
             body: JSON.stringify(subscription),
             headers: { 'Content-Type': 'application/json' }
         });
+
+        if (!subscribeResponse.ok) {
+            const errorBody = await subscribeResponse.text();
+            throw new Error(`Subscription save failed: ${subscribeResponse.status} ${errorBody}`);
+        }
 
         // Alert the user that the subscription was successful
         // They will now receive alerts for thresholds and watchdog timeouts

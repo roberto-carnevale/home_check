@@ -47,6 +47,19 @@ module.exports = {
         return snapshot.docs[0].data();
     },
 
+    // Function to retrieve the current watchdog alert state
+    // This allows Cloud Run instances to avoid duplicate notification floods
+    async getWatchdogStatus() {
+        const doc = await db.collection('watchdog_status').doc('current').get();
+        return doc.exists ? doc.data() : null;
+    },
+
+    // Function to persist the last alerted reading timestamp
+    // This prevents repeat alerts for the same stale reading.
+    async setWatchdogStatus(status) {
+        await db.collection('watchdog_status').doc('current').set(status);
+    },
+
     // Function to save a new web push subscription
     // This takes the subscription object provided by the browser
     async saveSubscription(subscription) {

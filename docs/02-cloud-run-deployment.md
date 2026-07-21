@@ -527,6 +527,22 @@ HTTP Status: 401
 
 The watchdog fires after 95 minutes of silence. To test it quickly, you can temporarily reduce `TIMEOUT_MS` in `watchdog.js` to 60000 (1 minute), redeploy, wait, and then restore it.
 
+#### Cloud Run scheduler support
+
+Because Cloud Run can scale to zero when the service is idle, the in-process timer may not fire reliably after a long silence. This project now exposes a scheduler-friendly endpoint at `GET /api/watchdog`.
+
+Use Cloud Scheduler or another periodic job to poll the endpoint every 10 minutes. If no new sensor reading arrives within 95 minutes, the endpoint triggers the watchdog alert and stores its alert state in Firestore.
+
+Example scheduler job:
+
+```bash
+gcloud scheduler jobs create http home-check-watchdog-check \
+  --schedule="*/10 * * * *" \
+  --uri="https://<YOUR_SERVICE_URL>/api/watchdog" \
+  --http-method=GET \
+  --time-zone="UTC"
+```
+
 ### 5. View Cloud Run logs
 
 ```bash

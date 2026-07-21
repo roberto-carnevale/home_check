@@ -1,7 +1,9 @@
-// Import the mailer and webpush services
+// Import the mailer, webpush, and Firestore services
 // The watchdog needs these to send emergency notifications when triggered
+// and to persist alert state for Cloud Run idle scaling.
 const mailer = require('./mailer');
 const webpush = require('./webpush');
+const firestore = require('./firestore');
 
 // Define the timeout duration in milliseconds
 // 95 minutes ensures we have a bit of leeway if the sensor is supposed to report every 90 mins
@@ -59,5 +61,52 @@ module.exports = {
             watchdogTimer = null;
             console.log('Watchdog stopped.');
         }
+    },
+
+    // Function to check the watchdog state on demand.
+    // This allows Cloud Run to use an external scheduler instead of relying solely on an in-memory timer.
+    async checkWatchdog() {
+        // Retrieve the latest sensor reading timestamp from Firestore
+        const latestReading = await firestore.getLatestReading();
+
+        if (!latestReading || typeof latestReading.timestamp !== 'number') {
+            return {
+                status: 'no-data',
+                message: 'No sensor readings are available yet.'
+            };
+        }
+
+        const lastSeenMs = latestReading.timestamp * 1000;
+        const ageMs = Date.now() - lastSeenMs;
+
+        if (ageMs < TIMEOUT_MS) {
+            return {
+                status: 'ok',
+                ageMs,
+                lastSeenAt: latestReading.timestamp
+            };
+        }
+
+        const currentStatus = await firestore.getWatchdogStatus();
+        if (currentStatus?.lastAlertedReadingTimestamp === latestReading.timestamp) {
+            return {
+                status: 'already-alerted',
+                ageMs,
+                lastSeenAt: latestReading.timestamp
+            };
+        }
+
+        await firestore.setWatchdogStatus({
+            lastAlertedReadingTimestamp: latestReading.timestamp,
+            lastAlertedAt: Date.now()
+        });
+
+        onWatchdogFire();
+
+        return {
+            status: 'alerted',
+            ageMs,
+            lastSeenAt: latestReading.timestamp
+        };
     }
 };
