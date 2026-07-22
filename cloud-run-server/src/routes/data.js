@@ -48,12 +48,6 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // This prevents the "No data received" alert from firing
         watchdog.resetWatchdog();
 
-        // Broadcast the new reading to all connected SSE dashboard clients
-        // Only call if the function has been injected (avoids startup race)
-        if (typeof broadcastFn === 'function') {
-            broadcastFn(data);
-        }
-
         // Initialize an array to collect any triggered threshold alerts
         // We might have multiple alerts (e.g. cold AND dark)
         const alerts = [];
@@ -101,8 +95,29 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
             webpush.sendPushToAll('Home Check Alert', alertMessage);
         }
 
-        // Respond with 200 OK so the ESP32 knows the payload was accepted
-        res.status(200).json({ success: true });
+        // Resolve PIR state: compare timestamps from the physical button
+        // and the dashboard. The most recent toggle wins.
+        let pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
+        if (typeof data.pir_enabled === 'boolean' && typeof data.pir_updated_at === 'number') {
+            const fsSeconds = pirCommand.updatedAt
+                ? (pirCommand.updatedAt.seconds || Math.floor(pirCommand.updatedAt._seconds || 0))
+                : 0;
+            if (data.pir_updated_at > fsSeconds) {
+                pirCommand = await firestore.setPirCommand(data.pir_enabled);
+            }
+        }
+
+        const pirEnabled = pirCommand.enabled === true;
+        const pirUpdatedAt = pirCommand.updatedAt
+            ? (pirCommand.updatedAt.seconds || pirCommand.updatedAt._seconds || 0)
+            : 0;
+
+        // Broadcast to SSE clients with the winning PIR state
+        if (typeof broadcastFn === 'function') {
+            broadcastFn({ ...data, pir_enabled: pirEnabled });
+        }
+
+        res.status(200).json({ success: true, pir_enabled: pirEnabled, pir_updated_at: pirUpdatedAt });
 
     } catch (error) {
         // Log the full error server-side; never expose internals to the client

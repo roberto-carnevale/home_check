@@ -4,6 +4,27 @@ let PUBLIC_VAPID_KEY = '';
 
 // Array to store active PIR events locally
 let activePirEvents = [];
+let pirEnabled = false;
+
+function updatePirButton() {
+    const button = document.getElementById('pirToggleBtn');
+    if (!button) return;
+
+    button.textContent = pirEnabled ? 'Deactivate PIR' : 'Activate PIR';
+    button.setAttribute('aria-pressed', String(pirEnabled));
+}
+
+async function loadPirState() {
+    try {
+        const response = await fetch('/api/pir');
+        if (!response.ok) throw new Error('Failed to load PIR state');
+        const state = await response.json();
+        pirEnabled = state.enabled === true;
+        updatePirButton();
+    } catch (error) {
+        console.error('Error loading PIR state:', error);
+    }
+}
 
 const loadPushConfig = async () => {
     try {
@@ -21,6 +42,7 @@ const loadPushConfig = async () => {
 };
 
 loadPushConfig();
+loadPirState();
 
 // Utility function to convert the base64 VAPID key to a Uint8Array
 // The push manager requires the applicationServerKey to be in this format
@@ -225,6 +247,12 @@ eventSource.onmessage = (event) => {
     document.getElementById('statusText').innerText =
         `Last updated: ${timeLabel} | Device: ${data.device_id}`;
 
+    // Sync PIR button with Firestore-confirmed state from server
+    if (typeof data.pir_enabled === 'boolean') {
+        pirEnabled = data.pir_enabled;
+        updatePirButton();
+    }
+
     // Update all three charts with the new average values
     // We use the 'avg' property as it's the most stable metric
     const timestamp = data.timestamp * 1000;
@@ -260,6 +288,31 @@ eventSource.onerror = (err) => {
     console.error('SSE Error:', err);
     document.getElementById('statusText').innerText = 'Connection lost. Reconnecting...';
 };
+
+document.getElementById('pirToggleBtn').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const nextState = !pirEnabled;
+    button.disabled = true;
+
+    try {
+        const response = await fetch('/api/pir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: nextState })
+        });
+        if (!response.ok) throw new Error(`PIR update failed: ${response.status}`);
+
+        pirEnabled = nextState;
+        updatePirButton();
+        document.getElementById('statusText').innerText =
+            `PIR ${pirEnabled ? 'activation' : 'deactivation'} requested. Waiting for device...`;
+    } catch (error) {
+        console.error('PIR update error:', error);
+        alert('Failed to update PIR state.');
+    } finally {
+        button.disabled = false;
+    }
+});
 
 // --- Web Push Subscription Logic ---
 // Handle the click event on the Subscribe button

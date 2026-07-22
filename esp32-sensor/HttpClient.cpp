@@ -6,6 +6,13 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h> // ESP32 HTTP client library
+#include <ArduinoJson.h>
+
+// Built-in root CA certificate bundle (Mozilla ~130 trusted roots)
+// Shipped with the ESP32 Arduino core; no manual cert management needed.
+// The linker symbol is embedded by the ESP-IDF build system.
+extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
+extern const uint8_t rootca_crt_bundle_end[] asm("_binary_x509_crt_bundle_end");
 
 // mbedTLS headers for cryptographic functions
 #include "mbedtls/md.h"
@@ -103,7 +110,7 @@ String HttpClient::computeSignature(const String &timestamp, const String &bodyH
 
 // postJson implementation
 // Sends signed POST request over HTTPS or plain HTTP (when no CA cert)
-bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
+bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, bool *pirCommand, unsigned long *pirCommandTs)
 {
     const size_t bodyLength = jsonBody.length();
     if (bodyLength == 0)
@@ -139,24 +146,29 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
     WiFiClient *plainClient = nullptr;
     bool begun = false;
 
+    secureClient = new WiFiClientSecure;
+    if (!secureClient)
+    {
+        Serial.println("[HTTP] Unable to create secure client");
+        return false;
+    }
+    secureClient->setHandshakeTimeout(30);
+
     if (_rootCa)
     {
-        secureClient = new WiFiClientSecure;
-        if (!secureClient)
-        {
-            Serial.println("[HTTP] Unable to create secure client");
-            return false;
-        }
-        secureClient->setHandshakeTimeout(30);
+        // Use a specific CA cert when provided (certificate pinning)
         secureClient->setCACert(_rootCa);
-        secureClient->setInsecure();
-        String url = String("https://") + _host + ":" + String(_port) + _path;
-        Serial.print("Connecting to: ");
-        Serial.println(url);
-        begun = http.begin(*secureClient, url);
-    } else{
-        Serial.println("[HTTP] No root CA provided, connection aborted for security reasons");
     }
+    else
+    {
+        // Use the built-in Mozilla root CA bundle (like a browser)
+        secureClient->setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
+    }
+
+    String url = String("https://") + _host + ":" + String(_port) + _path;
+    Serial.print("Connecting to: ");
+    Serial.println(url);
+    begun = http.begin(*secureClient, url);
 
 
     if (!begun)
@@ -190,6 +202,19 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED)
     {
         success = true;
+        if (pirCommand)
+        {
+            String response = http.getString();
+            StaticJsonDocument<128> doc;
+            if (deserializeJson(doc, response) == DeserializationError::Ok && doc["pir_enabled"].is<bool>())
+            {
+                *pirCommand = doc["pir_enabled"].as<bool>();
+                if (pirCommandTs && doc["pir_updated_at"].is<unsigned long>())
+                {
+                    *pirCommandTs = doc["pir_updated_at"].as<unsigned long>();
+                }
+            }
+        }
     }
     else if (httpCode >= 0)
     {
@@ -208,4 +233,59 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
     }
 
     return false;
+}
+
+bool HttpClient::getPirCommand(bool &enabled, unsigned long &updatedAt, unsigned long timestampUnix, const char *commandPath)
+{
+    String emptyBody = "";
+    String tsStr = String(timestampUnix);
+    String signature = computeSignature(tsStr, sha256Hex(emptyBody));
+    IPAddress resolvedIp;
+    if (!WiFi.hostByName(_host, resolvedIp))
+    {
+        Serial.println("[HTTP] DNS resolution failed while polling PIR command");
+        return false;
+    }
+
+    WiFiClientSecure secureClient;
+    secureClient.setHandshakeTimeout(30);
+
+    if (_rootCa)
+    {
+        secureClient.setCACert(_rootCa);
+    }
+    else
+    {
+        secureClient.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
+    }
+
+    HTTPClient http;
+    String url = String("https://") + _host + ":" + String(_port) + commandPath;
+    if (!http.begin(secureClient, url))
+    {
+        Serial.println("[HTTP] Unable to connect while polling PIR command");
+        return false;
+    }
+
+    http.addHeader("X-Timestamp", tsStr);
+    http.addHeader("X-Signature", signature);
+    http.setTimeout(15000);
+    int httpCode = http.GET();
+    bool success = false;
+    if (httpCode == HTTP_CODE_OK)
+    {
+        String response = http.getString();
+        StaticJsonDocument<128> doc;
+        if (deserializeJson(doc, response) == DeserializationError::Ok && doc["enabled"].is<bool>())
+        {
+            enabled = doc["enabled"].as<bool>();
+            if (doc["updated_at"].is<unsigned long>())
+            {
+                updatedAt = doc["updated_at"].as<unsigned long>();
+            }
+            success = true;
+        }
+    }
+    http.end();
+    return success;
 }

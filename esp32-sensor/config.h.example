@@ -20,6 +20,7 @@
 #define SERVER_PORT_LOCAL   8080
 // Shared API path
 #define SERVER_PATH         "/api/data"
+#define PIR_COMMAND_PATH    "/api/pir/command"
 
 // Device Identification
 // Unique ID for this specific sensor node
@@ -33,16 +34,24 @@
 #define LDR_PIN       34
 // SR505 PIR Motion Sensor digital input pin
 #define PIR_PIN       14
+// Button to toggle PIR monitoring on/off at runtime (active low, internal pull-up)
+#define PIR_TOGGLE_PIN 27
+// LED indicator: lit when PIR monitoring is active
+#define PIR_LED_PIN    2
 // Manual test button input pin (active low, using internal pull-up)
 #define BUTTON_PIN    13
 // Mode switch pin: HIGH/floating = remote server, GND = local server
 #define MODE_SWITCH_PIN  19
 
 // Timing and Interval Definitions
-// 1 minute between sensor samples (in milliseconds)
-#define SAMPLE_INTERVAL_MS   60000UL
+// 2 minutes between environmental sensor samples (in milliseconds)
+#define SAMPLE_INTERVAL_MS   120000UL
+// Poll PIR sensor every 5 seconds
+#define PIR_SAMPLE_INTERVAL_MS 5000UL
 // POST data to the server every 5 minutes
 #define REPORT_INTERVAL_MIN  5
+// Poll dashboard PIR command every 30 seconds
+#define PIR_COMMAND_POLL_INTERVAL_MS 30000UL
 // Calculate rolling statistics over the last 30 minutes
 #define ROLLING_WINDOW       30
 

@@ -45,14 +45,20 @@ gcloud run deploy "$SERVICE_NAME" \
     --source . \
     --region "$REGION" \
     --allow-unauthenticated \
-    --update-env-vars ALLOWED_ORIGIN="*" \
-    --update-secrets=HMAC_SECRET_KEY=home-check-hmac-secret:latest,SMTP_PASS=home-check-smtp-pass:latest,VAPID_PRIVATE_KEY=home-check-vapid-private:latest,VAPID_PUBLIC_KEY=home-check-vapid-public:latest,VAPID_SUBJECT=home-check-vapid-subject:latest,ALERT_EMAILS=home-check-alert-emails:latest,SMTP_USER=home-check-smtp-user:latest,SMTP_HOST=home-check-smtp-host:latest,SMTP_PORT=home-check-smtp-port:latest
+    --update-secrets=HMAC_SECRET_KEY=home-check-hmac-secret:latest,SESSION_SECRET=home-check-session-secret:latest,SMTP_PASS=home-check-smtp-pass:latest,VAPID_PRIVATE_KEY=home-check-vapid-private:latest,VAPID_PUBLIC_KEY=home-check-vapid-public:latest,VAPID_SUBJECT=home-check-vapid-subject:latest,ALERT_EMAILS=home-check-alert-emails:latest,SMTP_USER=home-check-smtp-user:latest,SMTP_HOST=home-check-smtp-host:latest,SMTP_PORT=home-check-smtp-port:latest,WATCHDOG_TOKEN=home-check-watchdog-token:latest
 
 # Retrieve the final URL of the deployed service
 # We query the service details and format the output as the URL string
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" \
     --region "$REGION" \
     --format "value(status.url)")
+
+# Set ALLOWED_ORIGIN to the actual service URL (not wildcard)
+# The dashboard and API share the same origin, so only this URL is needed
+echo "Setting ALLOWED_ORIGIN to ${SERVICE_URL}..."
+gcloud run services update "$SERVICE_NAME" \
+    --region "$REGION" \
+    --update-env-vars "ALLOWED_ORIGIN=${SERVICE_URL}"
 
 # Print a success message with the final URL
 # The user can now visit this URL to view their dashboard

@@ -17,6 +17,21 @@ const transporter = nodemailer.createTransport({
 // Export the mailer service module
 // This encapsulates our email sending logic
 module.exports = {
+    async sendLoginCode(code) {
+        const adminEmails = process.env.ADMIN_EMAILS || process.env.ALERT_EMAILS;
+        if (!adminEmails) {
+            throw new Error('No ADMIN_EMAILS or ALERT_EMAILS configured');
+        }
+
+        const recipients = adminEmails.split(',').map(email => email.trim()).filter(Boolean);
+        await Promise.all(recipients.map(email => transporter.sendMail({
+            from: `"Home Check Security" <${process.env.SMTP_USER}>`,
+            to: email,
+            subject: 'Home Check dashboard access code',
+            text: `Your Home Check dashboard access code is ${code}. It expires in 10 minutes and can only be used once.`
+        })));
+    },
+
     // Function to send an alert email
     // It takes a subject string and an HTML/text body
     async sendAlert(subject, body) {

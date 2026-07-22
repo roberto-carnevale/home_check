@@ -35,9 +35,12 @@
 | 7 | **Jumper wires** | Male–Male | ~10 | Assorted colours |
 | 8 | **USB cable** | Micro-USB or USB-C | 1 | Matches your ESP32 board |
 | 9 | **5V power supply** | USB adapter ≥ 500 mA | 1 | For permanent installation |
-| 10 | **Jumper wire or switch** | Male–Male or SPST toggle | 1 | Mode switch: GPIO19 to GND for local server |
+| 10 | **Jumper wire or switch** | Male-Male or SPST toggle | 1 | Mode switch: GPIO19 to GND for local server |
+| 11 | **Momentary push button** (PIR toggle) | Normally open | 1 | GPIO27 to GND; toggles PIR monitoring on/off |
+| 12 | **LED** (PIR status) | 3mm or 5mm, any colour | 1 | GPIO2; lit when PIR monitoring is active |
+| 13 | **Resistor** (LED current limiting) | 220-470 ohm | 1 | In series with the LED |
 
-> **Tip**: The DHT22 is more accurate than the DHT11 (±0.5 °C vs ±2 °C) and measures a wider humidity range. Always prefer DHT22 for a home-monitoring application.
+> **Tip**: The DHT22 is more accurate than the DHT11 (+-0.5 C vs +-2 C) and measures a wider humidity range. Always prefer DHT22 for a home-monitoring application.
 
 ---
 
@@ -238,12 +241,33 @@ MODE SWITCH CONNECTIONS (local/remote server select)
 ═══════════════════════════════════════════════════════════════════
 
   GPIO19 uses the ESP32 internal pull-up resistor.
-  Leave FLOATING (default) → remote Cloud Run server (HTTPS)
-  Connect to GND           → local development server (HTTP)
+  Leave FLOATING (default) -> remote Cloud Run server (HTTPS)
+  Connect to GND           -> local development server (HTTP)
 
   ESP32 GPIO19 ─────────────────── Switch/Jumper Pin A
 
   ESP32 GND    ─────────────────── Switch/Jumper Pin B
+
+═══════════════════════════════════════════════════════════════════
+PIR TOGGLE BUTTON CONNECTIONS (enable/disable PIR monitoring)
+═══════════════════════════════════════════════════════════════════
+
+  GPIO27 uses the ESP32 internal pull-up resistor.
+  Press to toggle PIR monitoring on/off at runtime.
+
+  ESP32 GPIO27 ─────────────────── Button Pin A
+
+  ESP32 GND    ─────────────────── Button Pin B (normally open)
+
+═══════════════════════════════════════════════════════════════════
+PIR STATUS LED CONNECTIONS
+═══════════════════════════════════════════════════════════════════
+
+  LED is lit when PIR monitoring is active.
+
+  ESP32 GPIO2  ─────── [220-470 ohm] ─────── LED Anode (+)
+
+  ESP32 GND    ────────────────────────────── LED Cathode (-)
 
 ═══════════════════════════════════════════════════════════════════
 ```
@@ -360,11 +384,16 @@ Open `config.h` and fill in:
 #define DHT_PIN        4    // GPIO connected to DHT22 DATA
 #define DHT_TYPE       DHT22
 #define LDR_PIN        34   // GPIO connected to LDR junction
+#define PIR_PIN        14   // SR505 PIR motion sensor output
+#define PIR_TOGGLE_PIN 27   // Button to toggle PIR monitoring on/off
+#define PIR_LED_PIN    2    // LED lit when PIR monitoring is active
 
 // ─── Timing ──────────────────────────────────────────────────
-#define SAMPLE_INTERVAL_MS  60000UL  // read sensors every 60 s
-#define REPORT_INTERVAL_MIN 5        // POST to server every 5 min
-#define ROLLING_WINDOW      30       // 30-sample (30 min) window
+#define SAMPLE_INTERVAL_MS         60000UL  // read sensors every 60 s
+#define PIR_SAMPLE_INTERVAL_MS     5000UL   // read PIR sensor every 5 s
+#define REPORT_INTERVAL_MIN        5        // POST to server every 5 min
+#define PIR_COMMAND_POLL_INTERVAL_MS 30000UL // poll dashboard PIR command every 30 s
+#define ROLLING_WINDOW             30       // 30-sample (30 min) window
 ```
 
 ### Step 2 — Create `secrets.h`
@@ -457,8 +486,9 @@ You should see output like:
 |---|---|
 | `[WIFI]` | WiFi connection, NTP time sync |
 | `[MODE]` | Server mode selection (LOCAL or REMOTE) based on GPIO19 |
-| `[SENSOR]` | DHT22 / LDR read, sample stored |
-| `[HTTP]` | HTTP/HTTPS POST, response code |
+| `[SENSOR]` | DHT22 / LDR / PIR read, sample stored |
+| `[PIR]` | PIR monitoring toggle, motion events, remote command polling |
+| `[HTTP]` | HTTP/HTTPS POST, response code, PIR command polling |
 
 ### Common Serial Monitor Errors
 

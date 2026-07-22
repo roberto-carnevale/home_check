@@ -16,7 +16,10 @@ public:
     // POSTs a JSON string to the configured endpoint
     // Requires a timestamp header; signs the request for authentication
     // Returns true if server responds with 200 or 201
-    bool postJson(const String& jsonBody, unsigned long timestampUnix);
+    bool postJson(const String& jsonBody, unsigned long timestampUnix, bool* pirCommand = nullptr, unsigned long* pirCommandTs = nullptr);
+
+    // Fetches the latest signed PIR enable/disable command.
+    bool getPirCommand(bool& enabled, unsigned long& updatedAt, unsigned long timestampUnix, const char* commandPath);
 
 private:
     // Server connection details

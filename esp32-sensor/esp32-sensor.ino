@@ -29,6 +29,7 @@ unsigned long lastSampleTime = 0;
 unsigned long lastPirSampleTime = 0;
 unsigned long lastPirReportTime = 0;
 unsigned long lastReportTime = 0;
+unsigned long lastPirCommandPollTime = 0;
 const unsigned long PIR_REPORT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 
 // Track button state and last press time for manual test triggers with lockout
@@ -41,6 +42,7 @@ int lastToggleButtonState = LOW;
 unsigned long lastToggleButtonPressTime = 0;
 const unsigned long PIR_TOGGLE_LOCKOUT_MS = 250UL;
 bool pirEnabled = false;
+unsigned long pirUpdatedAt = 0; // Unix timestamp of last PIR toggle (physical or server)
 
 // Function to connect or reconnect to WiFi
 void connectWiFi() {
@@ -110,6 +112,8 @@ void sendReport(unsigned long ts) {
         // Add motion detection alarm status
         bool motionFlag = sensorMgr->isMotionDetected();
         doc["motion_detected"] = motionFlag;
+        doc["pir_enabled"] = pirEnabled;
+        doc["pir_updated_at"] = pirUpdatedAt;
         if (motionFlag) {
             Serial.printf("[PIR] Motion event reported for device %s at timestamp %lu\n", DEVICE_ID, ts);
         }
@@ -139,10 +143,22 @@ void sendReport(unsigned long ts) {
         Serial.print("[HTTP] Payload: ");
         Serial.println(jsonBody);
 
-        // POST JSON to server
-        if (httpClient->postJson(jsonBody, ts)) {
+        // POST JSON to server; the response carries the winning PIR state + timestamp
+        bool commandedPir = pirEnabled;
+        unsigned long commandedPirTs = 0;
+        if (httpClient->postJson(jsonBody, ts, &commandedPir, &commandedPirTs)) {
             Serial.println("[HTTP] Report sent successfully.");
             sensorMgr->clearMotionFlag(); // Reset the sticky flag
+            // Adopt server state only if its timestamp is newer than ours
+            if (commandedPirTs > pirUpdatedAt && commandedPir != pirEnabled) {
+                pirEnabled = commandedPir;
+                pirUpdatedAt = commandedPirTs;
+                digitalWrite(PIR_LED_PIN, pirEnabled ? HIGH : LOW);
+                Serial.printf("[PIR] Server commanded PIR %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
+                if (!pirEnabled) {
+                    sensorMgr->clearMotionFlag();
+                }
+            }
         } else {
             Serial.println("[HTTP] Failed to send report.");
         }
@@ -171,13 +187,13 @@ void setup() {
         // Pin floating/HIGH → remote Cloud Run server
         host = SERVER_HOST_REMOTE;
         port = SERVER_PORT_REMOTE;
-        caCert = ROOT_CA_CERT;
+        caCert = nullptr;  // use built-in CA bundle (like a browser)
         Serial.println("[MODE] REMOTE server selected (GPIO19 HIGH)");
     } else {
         // Pin tied to GND → local development server
         host = SERVER_HOST_LOCAL;
         port = SERVER_PORT_LOCAL;
-        caCert = nullptr;  // no TLS for local
+        caCert = nullptr;  // use built-in CA bundle
         Serial.println("[MODE] LOCAL server selected (GPIO19 GND)");
     }
 
@@ -238,7 +254,8 @@ void loop() {
         currentMillis - lastToggleButtonPressTime >= PIR_TOGGLE_LOCKOUT_MS) {
         lastToggleButtonPressTime = currentMillis;
         pirEnabled = !pirEnabled;
-        Serial.printf("[PIR] Monitoring %s\n", pirEnabled ? "enabled" : "disabled");
+        pirUpdatedAt = getTimestamp();
+        Serial.printf("[PIR] Monitoring %s (physical toggle at %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
         if (!pirEnabled) {
             digitalWrite(PIR_LED_PIN, LOW);
         } else {
@@ -246,6 +263,23 @@ void loop() {
         }
     }
     lastToggleButtonState = toggleButtonState;
+
+    // Poll the dashboard command so PIR can also be controlled remotely.
+    if (currentMillis - lastPirCommandPollTime >= PIR_COMMAND_POLL_INTERVAL_MS || lastPirCommandPollTime == 0) {
+        lastPirCommandPollTime = currentMillis;
+        bool requestedPirState = pirEnabled;
+        unsigned long requestedPirTs = 0;
+        if (httpClient->getPirCommand(requestedPirState, requestedPirTs, getTimestamp(), PIR_COMMAND_PATH) &&
+            requestedPirTs > pirUpdatedAt && requestedPirState != pirEnabled) {
+            pirEnabled = requestedPirState;
+            pirUpdatedAt = requestedPirTs;
+            digitalWrite(PIR_LED_PIN, pirEnabled ? HIGH : LOW);
+            Serial.printf("[PIR] Remote monitoring %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
+            if (!pirEnabled) {
+                sensorMgr->clearMotionFlag();
+            }
+        }
+    }
 
     // Check if it's time to poll the PIR sensor
     if (pirEnabled && (currentMillis - lastPirSampleTime >= PIR_SAMPLE_INTERVAL_MS || lastPirSampleTime == 0)) {

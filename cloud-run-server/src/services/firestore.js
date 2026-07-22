@@ -10,6 +10,32 @@ const db = new Firestore();
 // Export the Firestore service module
 // This encapsulates all database operations
 module.exports = {
+    async saveLoginChallenge(challenge) {
+        await db.collection('auth_challenges').doc('dashboard').set(challenge);
+    },
+
+    async getLoginChallenge() {
+        const doc = await db.collection('auth_challenges').doc('dashboard').get();
+        return doc.exists ? doc.data() : null;
+    },
+
+    async clearLoginChallenge() {
+        await db.collection('auth_challenges').doc('dashboard').delete();
+    },
+
+    // Retrieve the desired PIR state for the sensor node.
+    async getPirCommand() {
+        const doc = await db.collection('device_commands').doc('pir').get();
+        return doc.exists ? doc.data() : { enabled: false };
+    },
+
+    // Persist the desired PIR state so it is available to every Cloud Run instance.
+    async setPirCommand(enabled) {
+        const command = { enabled, updatedAt: Firestore.Timestamp.now() };
+        await db.collection('device_commands').doc('pir').set(command);
+        return command;
+    },
+
     // Function to save a new sensor reading
     // It takes the parsed JSON data as input
     async saveReading(data) {

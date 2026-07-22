@@ -36,16 +36,24 @@ Two independent components share an HMAC secret:
 - **SSE broadcast injection**: `index.js` owns the `sseClients` Set and injects a `broadcast()` function into `routes/data.js` via `setBroadcast()` to avoid circular requires.
 - **Watchdog**: `services/watchdog.js` runs a 95-minute dead-man timer, reset on each valid POST. Fires email + push if ESP32 goes silent.
 - **Fire-and-forget alerts**: Email (`services/mailer.js` via Nodemailer SMTP) and push (`services/webpush.js` via VAPID) are not awaited in the request handler.
+- **PIR command piggyback**: The ESP32 is behind a firewall and cannot receive inbound connections. PIR enable/disable commands from the dashboard are stored in Firestore (with `updatedAt` timestamp) and delivered to the ESP32 piggybacked on the `POST /api/data` response (`pir_enabled` + `pir_updated_at`). The ESP32 also tracks a local `pirUpdatedAt` timestamp for physical button presses and sends it in the payload. The server compares timestamps: if the ESP32's physical toggle is newer, it syncs to Firestore; otherwise the dashboard's command wins. The ESP32 likewise only adopts the server's state if its timestamp is newer. **Most recent toggle wins**, whether from dashboard or physical button.
 
 ### Endpoints
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/data` | ESP32 sensor data ingestion (HMAC-protected) |
+| POST | `/api/data` | ESP32 sensor data ingestion (HMAC-protected); response includes `pir_enabled` command |
 | POST | `/api/subscribe` | Register Web Push subscription |
 | GET | `/api/sse` | Server-Sent Events stream for dashboard |
 | GET | `/api/history` | Last 48h readings + last 10 PIR events |
-| GET | `/` | Static PWA dashboard |
+| GET | `/api/config` | Runtime config (VAPID public key) |
+| GET | `/api/pir` | Get desired PIR state from Firestore |
+| POST | `/api/pir` | Set desired PIR state from dashboard |
+| GET | `/api/pir/command` | ESP32 polls PIR command (HMAC-protected, legacy) |
+| POST | `/api/auth/request-code` | Request 6-digit email login code |
+| POST | `/api/auth/verify-code` | Verify login code and create session |
+| GET | `/api/watchdog` | Cloud Scheduler health-check endpoint |
+| GET | `/` | Dashboard (requires session auth) |
 
 ### Alert Thresholds
 
@@ -68,6 +76,8 @@ Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity 
   "temperature": { "min": "number", "max": "number", "avg": "number" },
   "humidity": { "min": "number", "max": "number", "avg": "number" },
   "light_raw": { "min": "number", "max": "number", "avg": "number" },
-  "motion_detected": "boolean (optional)"
+  "motion_detected": "boolean (optional)",
+  "pir_enabled": "boolean (optional)",
+  "pir_updated_at": "integer (optional, unix seconds of last PIR toggle)"
 }
 ```

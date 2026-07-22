@@ -198,6 +198,10 @@ NODE_ENV=production
 # Must match HMAC_SECRET in esp32-sensor/secrets.h
 HMAC_SECRET_KEY=paste_your_64_char_hex_secret_here
 
+# Separate key for signing dashboard session cookies
+# Generate with: openssl rand -hex 32
+SESSION_SECRET=paste_a_different_64_char_hex_secret_here
+
 # Set after deploy — the Cloud Run service URL
 ALLOWED_ORIGIN=https://YOUR_SERVICE_URL.run.app
 
@@ -257,6 +261,7 @@ create_secret() {
 
 # Create all secrets
 create_secret "home-check-hmac-secret"      "$HMAC_SECRET_KEY"
+create_secret "home-check-session-secret"   "$SESSION_SECRET"
 create_secret "home-check-smtp-host"        "$SMTP_HOST"
 create_secret "home-check-smtp-port"        "$SMTP_PORT"
 create_secret "home-check-smtp-user"        "$SMTP_USER"
@@ -356,6 +361,7 @@ gcloud run deploy home-check-server \
   --max-instances=3 \
   --set-secrets="\
 HMAC_SECRET_KEY=home-check-hmac-secret:latest,\
+SESSION_SECRET=home-check-session-secret:latest,\
 SMTP_HOST=home-check-smtp-host:latest,\
 SMTP_PORT=home-check-smtp-port:latest,\
 SMTP_USER=home-check-smtp-user:latest,\
@@ -468,7 +474,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 echo "https://home-check-server-xxxx-uc.a.run.app"
 ```
 
-You should see the dark-themed "Home Check" dashboard with three empty chart areas.
+You should see the login page. Click "Email access code" to receive a six-digit code at the configured `ADMIN_EMAILS` (falls back to `ALERT_EMAILS`). Enter the code to access the dark-themed "Home Check" dashboard with three chart areas, a PIR toggle button, and a motion event log.
 
 ### 2. Test the data endpoint with curl
 
@@ -533,13 +539,18 @@ Because Cloud Run can scale to zero when the service is idle, the in-process tim
 
 Use Cloud Scheduler or another periodic job to poll the endpoint every 10 minutes. If no new sensor reading arrives within 95 minutes, the endpoint triggers the watchdog alert and stores its alert state in Firestore.
 
-Example scheduler job:
+Example scheduler job (the `Authorization` header carries the `WATCHDOG_TOKEN` secret):
 
 ```bash
+# Read the token from Secret Manager (or paste it directly)
+WATCHDOG_TOKEN=$(gcloud secrets versions access latest \
+  --secret=home-check-watchdog-token --project=$PROJECT_ID)
+
 gcloud scheduler jobs create http home-check-watchdog-check \
   --schedule="*/10 * * * *" \
   --uri="https://<YOUR_SERVICE_URL>/api/watchdog" \
   --http-method=GET \
+  --headers="Authorization=Bearer ${WATCHDOG_TOKEN}" \
   --time-zone="UTC"
 ```
 

@@ -47,7 +47,7 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 │  │   ESP32     │────────────────────────────────────┐   │
 │  │  + DHT22    │  X-Timestamp, X-Signature (HMAC)   │   │
 │  │  + LDR      │                                    │   │
-│  │  + SR505    │                                    │   │
+│  │  + SR505    │◄───── PIR command in POST response  │   │
 │  └─────────────┘                                    │   │
 └─────────────────────────────────────────────────────│───┘
                                                       │
@@ -55,9 +55,12 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
                                               │   Google Cloud Run (Node.js)     │
                                               │                                  │
                                               │  POST /api/data   ◄──── ESP32   │
+                                              │    └─► response: {pir_enabled}  │
+                                              │  POST /api/pir    ◄──── Browser │
                                               │  POST /api/subscribe ◄── Browser│
                                               │  GET  /api/sse    ────► Browser │
                                               │  GET  /api/history────► Browser │
+                                              │  POST /api/auth/* ◄──── Browser │
                                               │  GET  /           ────► Browser │
                                               │                                  │
                                               │  ┌────────────┐                 │
@@ -80,7 +83,8 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 2. **Every 5 minutes** it computes min / max / avg over the rolling 30-minute window and POSTs a signed JSON payload to the Cloud Run endpoint.
 3. The server **verifies the HMAC-SHA256 signature** and the timestamp (replay-attack protection), validates the payload with Joi, stores it in Firestore, and broadcasts it to all open dashboard connections via **Server-Sent Events**.
 4. The server evaluates **alert thresholds**; if any are breached it sends an email and a Web Push notification instantly.
-5. A **95-minute watchdog timer** resets on every successful POST. If it fires (no data received), the server sends an "ESP32 offline" alert via email and push notification.
+5. The `POST /api/data` **response includes the desired PIR state** from Firestore (`pir_enabled` + `pir_updated_at`), so the ESP32 picks up dashboard commands without needing an inbound connection (firewall-friendly). Both the dashboard and the physical button record a timestamp when toggled. The server compares timestamps on each POST: if the ESP32's physical toggle is newer, Firestore is updated; otherwise the dashboard's command stands. The ESP32 likewise only adopts the server's state if its timestamp is newer. **Most recent toggle wins.**
+6. A **95-minute watchdog timer** resets on every successful POST. If it fires (no data received), the server sends an "ESP32 offline" alert via email and push notification.
 
 ---
 
@@ -93,7 +97,8 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 | 🔐 HMAC-SHA256 auth | Every ESP32 POST is signed; replays blocked within 5 min |
 | 📧 Email alerts | Nodemailer via SMTP; configurable recipient list |
 | 📱 Push notifications | Web Push (VAPID); works in Chrome for Android without a native app |
-| 🖥️ Live dashboard | PWA with real-time charts; installable on Android |
+| 🖥️ Live dashboard | PWA with real-time charts; installable on Android; email-code login |
+| 🎛️ Remote PIR control | Toggle PIR from dashboard or physical button; command piggybacked on POST response (firewall-friendly); most recent toggle wins via timestamp comparison |
 | ⏱️ Watchdog | 95-minute dead-man timer; alerts if ESP32 goes silent |
 | ☁️ Serverless | Cloud Run auto-scales to zero; Firestore free tier friendly |
 | 🔒 Security | Rate limiting, CORS allowlist, non-root Docker user, no secrets in code |
@@ -124,7 +129,8 @@ home_check/
     ├── src/
     │   ├── index.js                  Express app entry point
     │   ├── routes/
-    │   │   ├── data.js               POST /api/data
+    │   │   ├── data.js               POST /api/data (+ PIR command sync)
+    │   │   ├── watchdog.js           GET /api/watchdog
     │   │   └── subscribe.js          POST /api/subscribe
     │   ├── services/
     │   │   ├── firestore.js          Firestore helpers
@@ -136,7 +142,8 @@ home_check/
     │   │   └── validate.js           Joi schema validator
     │   └── public/
     │       ├── index.html            Dashboard PWA
-    │       ├── app.js                Dashboard JS (SSE + charts)
+    │       ├── login.html            Email-code login page
+    │       ├── app.js                Dashboard JS (SSE + charts + PIR toggle)
     │       ├── sw.js                 Service Worker (push notifications)
     │       └── manifest.json         PWA manifest
     └── tests/
@@ -156,6 +163,9 @@ home_check/
 | Light sensor | **LDR / photoresistor** | 10 kΩ pull-down to GND; signal to `GPIO34` (ADC) |
 | Motion sensor | **SR505 PIR** | Digital output to `GPIO14`; powered from 5V (VIN) |
 | Manual test button | **Momentary push button** | Between `GPIO13` and GND (active low, internal pull-up) |
+| PIR toggle button | **Momentary push button** | Between `GPIO27` and GND (active low, internal pull-up) |
+| PIR status LED | **LED + resistor** | On `GPIO26`; lit when PIR monitoring is active |
+| Mode switch | **SPDT switch or jumper** | `GPIO19` to GND = local dev; floating/HIGH = remote Cloud Run |
 | Power | USB or 5V adapter | For continuous operation |
 
 ### Wiring Diagram
@@ -179,6 +189,14 @@ GPIO14 ───►  SR505 PIR OUT pin
 
 GPIO13 ───►  Push button (one pin)
              Other pin   → GND (uses internal pull-up)
+
+GPIO27 ───►  PIR toggle button (one pin)
+             Other pin   → GND (uses internal pull-up)
+
+GPIO26 ───►  PIR LED anode (via 220Ω resistor)
+             LED cathode  → GND
+
+GPIO19 ───►  Mode switch (GND = local, floating = remote)
 ```
 
 ### Arduino IDE Library Dependencies
@@ -342,11 +360,13 @@ chmod +x deploy.sh
 # Set required env vars first:
 export GOOGLE_CLOUD_PROJECT=your-project-id
 export HMAC_SECRET_KEY=your-hmac-secret
+export SESSION_SECRET=your-dashboard-session-secret
 export SMTP_HOST=smtp.gmail.com
 export SMTP_PORT=587
 export SMTP_USER=you@gmail.com
 export SMTP_PASS=your-app-password
 export ALERT_EMAILS=alert1@example.com,alert2@example.com
+export ADMIN_EMAILS=admin1@example.com,admin2@example.com
 export VAPID_PUBLIC_KEY=your-vapid-public
 export VAPID_PRIVATE_KEY=your-vapid-private
 export VAPID_SUBJECT=mailto:admin@example.com
@@ -362,11 +382,22 @@ The script prints the public service URL on success. Copy it into `config.h` on 
 ## Dashboard & Android Notifications
 
 1. **Open the dashboard** in Chrome for Android at your Cloud Run URL.
-2. Tap the **"Subscribe to Notifications"** button and allow notifications when prompted.
-3. Your subscription is stored in Firestore and receives a push notification whenever an alert fires or the watchdog triggers.
-4. To **install as a PWA**, tap the Chrome menu → "Add to Home screen".
+2. Request a six-digit access code. The code is sent to every address in `ADMIN_EMAILS`.
+3. Enter the one-time code to open the dashboard. It expires after 10 minutes; the browser session lasts 12 hours.
+4. Tap the **"Subscribe to Notifications"** button and allow notifications when prompted.
+5. Your subscription is stored in Firestore and receives a push notification whenever an alert fires or the watchdog triggers.
+6. To **install as a PWA**, tap the Chrome menu → "Add to Home screen".
 
-The dashboard shows three live line charts (Temperature, Humidity, Light) updated in real-time via Server-Sent Events.
+The dashboard shows three live line charts (Temperature, Humidity, Light) updated in real-time via Server-Sent Events, a PIR motion event log, and an **Activate/Deactivate PIR** button.
+
+### PIR Remote Control
+
+The ESP32 sits behind a firewall and cannot receive inbound connections. PIR commands are resolved by **timestamp comparison** — the most recent toggle always wins, whether it comes from the dashboard or the physical button (GPIO27).
+
+- **Dashboard toggle**: `POST /api/pir` stores `{ enabled, updatedAt }` in Firestore.
+- **Physical button toggle**: The ESP32 records a Unix timestamp (`pirUpdatedAt`) and sends `pir_enabled` + `pir_updated_at` in the next `POST /api/data` payload.
+- **Server resolution**: On each `POST /api/data`, the server compares the ESP32's `pir_updated_at` with Firestore's `updatedAt`. If the ESP32's is newer, Firestore is updated. The response returns the winning state (`pir_enabled` + `pir_updated_at`).
+- **ESP32 resolution**: The ESP32 only adopts the server's command if its timestamp is newer than the local `pirUpdatedAt`.
 
 ---
 
@@ -395,8 +426,10 @@ Each triggered alert sends **both** an email and a push notification.
 | `PORT` | No | `8080` | HTTP port (Cloud Run sets this automatically) |
 | `NODE_ENV` | No | `production` | Node environment |
 | `HMAC_SECRET_KEY` | ✅ | `64-char-hex` | HMAC shared secret (must match ESP32 `secrets.h`) |
+| `SESSION_SECRET` | ✅ | `random-secret` | Signs dashboard login session cookies |
 | `ALLOWED_ORIGIN` | ✅ | `https://...run.app` | CORS allowed origin |
 | `ALERT_EMAILS` | ✅ | `a@b.com,c@d.com` | Comma-separated email alert recipients |
+| `ADMIN_EMAILS` | No* | `a@b.com,c@d.com` | Login-code recipients (*falls back to `ALERT_EMAILS`) |
 | `SMTP_HOST` | ✅ | `smtp.gmail.com` | SMTP server hostname |
 | `SMTP_PORT` | ✅ | `587` | SMTP port (587 = STARTTLS) |
 | `SMTP_USER` | ✅ | `you@gmail.com` | SMTP username |

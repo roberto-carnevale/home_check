@@ -48,7 +48,7 @@ module.exports = function verifyHMAC(req, res, next) {
     // callback in express.json). This avoids re-serialization differences such as
     // float formatting (e.g. 25.50 → 25.5) that would break the hash.
     // Falls back to JSON.stringify for tests or if rawBody is unavailable.
-    const bodyString = req.rawBody || JSON.stringify(req.body);
+    const bodyString = req.rawBody || (req.body === undefined ? '' : JSON.stringify(req.body));
 
     // Compute the SHA256 hash of the body
     // This ensures the body hasn't been tampered with
@@ -60,7 +60,7 @@ module.exports = function verifyHMAC(req, res, next) {
 
     // Retrieve the secret key from environment variables
     // This key must match the one flashed on the ESP32
-    const secret = process.env.HMAC_SECRET_KEY || 'default_secret';
+    const secret = process.env.HMAC_SECRET_KEY;
 
     if (!secret) {
         console.error('HMAC secret key is not set in environment variables');
