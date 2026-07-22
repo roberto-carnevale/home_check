@@ -13,7 +13,8 @@ jest.mock('../src/services/webpush', () => ({
 jest.mock('../src/services/firestore', () => ({
     getLatestReading: jest.fn(),
     getWatchdogStatus: jest.fn(),
-    setWatchdogStatus: jest.fn()
+    setWatchdogStatus: jest.fn(),
+    deleteReadingsOlderThan48Hours: jest.fn().mockResolvedValue()
 }));
 
 // Import the mocked dependencies and the watchdog module
@@ -35,7 +36,7 @@ describe('Watchdog Service', () => {
     });
 
     // Test case: The watchdog fires if the timer runs out
-    it('should fire alerts after timeout', () => {
+    it('should fire alerts and prune old readings after timeout', async () => {
         // Start the watchdog timer
         watchdog.resetWatchdog();
 
@@ -45,21 +46,22 @@ describe('Watchdog Service', () => {
 
         // Fast-forward time by exactly 95 minutes (in milliseconds)
         // This triggers any pending setTimeouts
-        jest.advanceTimersByTime(95 * 60 * 1000);
+        await jest.advanceTimersByTimeAsync(95 * 60 * 1000);
 
         // Now, we expect both alerting functions to have been called once
         // This proves the watchdog fired correctly
         expect(mailer.sendAlert).toHaveBeenCalledTimes(1);
         expect(webpush.sendPushToAll).toHaveBeenCalledTimes(1);
+        expect(firestore.deleteReadingsOlderThan48Hours).toHaveBeenCalledTimes(1);
     });
 
     // Test case: Resetting the watchdog cancels the previous timer
-    it('should cancel previous timer when reset', () => {
+    it('should cancel previous timer when reset', async () => {
         // Start the watchdog timer
         watchdog.resetWatchdog();
 
         // Fast-forward 50 minutes (not enough to trigger)
-        jest.advanceTimersByTime(50 * 60 * 1000);
+        await jest.advanceTimersByTimeAsync(50 * 60 * 1000);
 
         // Reset the watchdog because we (hypothetically) received new data
         // This should clear the old timer and start a new 95-minute countdown
@@ -68,12 +70,12 @@ describe('Watchdog Service', () => {
         // Fast-forward another 50 minutes
         // The total elapsed time is 100m, but since we reset at 50m,
         // the new timer still has 45m remaining. It should NOT fire yet.
-        jest.advanceTimersByTime(50 * 60 * 1000);
+        await jest.advanceTimersByTimeAsync(50 * 60 * 1000);
         expect(mailer.sendAlert).not.toHaveBeenCalled();
 
         // Fast-forward another 50 minutes (total 100m since reset)
         // Now the second timer should definitely fire
-        jest.advanceTimersByTime(50 * 60 * 1000);
+        await jest.advanceTimersByTimeAsync(50 * 60 * 1000);
         expect(mailer.sendAlert).toHaveBeenCalledTimes(1);
     });
 
@@ -87,6 +89,7 @@ describe('Watchdog Service', () => {
 
         expect(mailer.sendAlert).toHaveBeenCalledTimes(1);
         expect(webpush.sendPushToAll).toHaveBeenCalledTimes(1);
+        expect(firestore.deleteReadingsOlderThan48Hours).toHaveBeenCalledTimes(1);
         expect(firestore.setWatchdogStatus).toHaveBeenCalledWith(expect.objectContaining({
             lastAlertedReadingTimestamp: staleTimestamp
         }));

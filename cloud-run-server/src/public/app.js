@@ -145,7 +145,6 @@ function renderPirEvents(events) {
             <li class="event-item">
                 <div>
                     <span class="event-time">${timeStr}</span>
-                    <span class="event-meta"> | Temp: ${event.temperature_avg.toFixed(1)}°C | Hum: ${event.humidity_avg.toFixed(1)}%</span>
                 </div>
                 <span class="event-status">MOTION</span>
             </li>

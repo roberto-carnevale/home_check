@@ -15,11 +15,17 @@ let watchdogTimer = null;
 
 // Function to handle the watchdog triggering
 // This is executed if the timer ever completes without being reset
-const onWatchdogFire = () => {
+const onWatchdogFire = async () => {
     // Define the critical alert message
     // This indicates a complete failure of the sensor or network
     const alertMessage = 'CRITICAL: No data received from sensor for 95 minutes. Sensor may be offline or power is out.';
     console.error(alertMessage);
+
+    try {
+        await firestore.deleteReadingsOlderThan48Hours();
+    } catch (error) {
+        console.error('Failed to prune readings older than 48 hours:', error);
+    }
 
     // Send an email alert to the configured admins
     // We use a high-priority subject line
@@ -101,7 +107,7 @@ module.exports = {
             lastAlertedAt: Date.now()
         });
 
-        onWatchdogFire();
+        await onWatchdogFire();
 
         return {
             status: 'alerted',

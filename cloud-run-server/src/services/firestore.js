@@ -169,5 +169,27 @@ module.exports = {
 
         await batch.commit();
         console.log(`Pruned ${snapshot.size} readings older than 30 days.`);
+    },
+
+    // Function to delete readings older than 48 hours
+    // Run when the watchdog fires to keep only the dashboard retention window
+    async deleteReadingsOlderThan48Hours() {
+        const fortyEightHoursAgo = Math.floor(Date.now() / 1000) - (48 * 60 * 60);
+
+        const snapshot = await db.collection('readings')
+            .where('timestamp', '<', fortyEightHoursAgo)
+            .get();
+
+        if (snapshot.empty) {
+            return;
+        }
+
+        const batch = db.batch();
+        snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        await batch.commit();
+        console.log(`Pruned ${snapshot.size} readings older than 48 hours.`);
     }
 };
