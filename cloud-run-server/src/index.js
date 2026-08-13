@@ -83,7 +83,7 @@ const isAuthenticated = (req) => {
 
 const requireAuth = (req, res, next) => {
     if (isAuthenticated(req)) return next();
-    if (req.path === '/' || req.path.startsWith('/api/')) {
+    if (req.path.startsWith('/api/')) {
         return res.status(401).json({ error: 'Authentication required' });
     }
     return res.redirect('/login.html');
