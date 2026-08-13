@@ -48,54 +48,7 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // This prevents the "No data received" alert from firing
         watchdog.resetWatchdog();
 
-        // Initialize an array to collect any triggered threshold alerts
-        // We might have multiple alerts (e.g. cold AND dark)
-        const alerts = [];
-
-        // Check if the average temperature exceeds the high threshold
-        // We use avg to prevent spurious spikes from triggering alerts
-        if (data.temperature.avg > THRESHOLDS.tempHigh) {
-            alerts.push(`High Temperature Alert: ${data.temperature.avg.toFixed(1)}°C`);
-        }
-
-        // Check if the average temperature drops below the low threshold
-        // This is critical to prevent frozen pipes in winter
-        if (data.temperature.avg < THRESHOLDS.tempLow) {
-            alerts.push(`Low Temperature Alert: ${data.temperature.avg.toFixed(1)}°C`);
-        }
-
-        // Check if humidity exceeds the high threshold
-        // High humidity can cause mould growth
-        if (data.humidity.avg > THRESHOLDS.humidityHigh) {
-            alerts.push(`High Humidity Alert: ${data.humidity.avg.toFixed(1)}%`);
-        }
-
-        // Check if humidity drops below the low threshold
-        // Extremely low humidity is uncomfortable and bad for wood furniture
-        if (data.humidity.avg < THRESHOLDS.humidityLow) {
-            alerts.push(`Low Humidity Alert: ${data.humidity.avg.toFixed(1)}%`);
-        }
-
-        // Check if motion was detected by the SR505 PIR sensor
-        if (data.motion_detected === true) {
-            console.log(`PIR activated on device ${data.device_id} at ${new Date(data.timestamp * 1000).toISOString()}`);
-            alerts.push('Motion Alert: Intrusion / Motion detected in monitored area!');
-        }
-
-        // If any alerts were triggered, notify users via email and push.
-        // We fire-and-forget (no await) so the ESP32 gets a fast response.
-        if (alerts.length > 0) {
-            const alertMessage = alerts.join('\n');
-            console.log('Triggering alerts:', alertMessage);
-
-            // Send email alert — iterates over all ALERT_EMAILS addresses
-            mailer.sendAlert('Sensor Alarm Alert', alertMessage);
-
-            // Push notification to all subscribed Android/Chrome devices
-            webpush.sendPushToAll('Home Check Alert', alertMessage);
-        }
-
-        // Resolve PIR state: compare timestamps from the physical button
+        // Resolve PIR state FIRST: compare timestamps from the physical button
         // and the dashboard. The most recent toggle wins.
         let pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
         if (typeof data.pir_enabled === 'boolean' && typeof data.pir_updated_at === 'number') {
@@ -111,6 +64,52 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         const pirUpdatedAt = pirCommand.updatedAt
             ? (pirCommand.updatedAt.seconds || pirCommand.updatedAt._seconds || 0)
             : 0;
+
+        // Initialize an array to collect any triggered threshold alerts
+        // We might have multiple alerts (e.g. cold AND dark)
+        const alerts = [];
+
+        // Check environmental thresholds
+        if (data.temperature.avg > THRESHOLDS.tempHigh) {
+            alerts.push(`High Temperature Alert: ${data.temperature.avg.toFixed(1)}°C`);
+        }
+        if (data.temperature.avg < THRESHOLDS.tempLow) {
+            alerts.push(`Low Temperature Alert: ${data.temperature.avg.toFixed(1)}°C`);
+        }
+        if (data.humidity.avg > THRESHOLDS.humidityHigh) {
+            alerts.push(`High Humidity Alert: ${data.humidity.avg.toFixed(1)}%`);
+        }
+        if (data.humidity.avg < THRESHOLDS.humidityLow) {
+            alerts.push(`Low Humidity Alert: ${data.humidity.avg.toFixed(1)}%`);
+        }
+
+        // Process PIR motion
+        if (data.motion_detected === true) {
+            console.log(`PIR activated on device ${data.device_id} at ${new Date(data.timestamp * 1000).toISOString()}`);
+            
+            if (!pirEnabled && data.pir_enabled === true) {
+                // The hardware triggered and thought it was armed, but the dashboard
+                // recently disabled it. The hardware just hasn't polled the new state yet.
+                // Send the welcome email, but NO intrusion push notification.
+                mailer.sendAlert('Welcome Home', 'The PIR sensor see you entering, shuting down the alarm. Welcome home');
+            } else if (pirEnabled) {
+                // System is actually armed
+                alerts.push('Motion Alert: Intrusion / Motion detected in monitored area!');
+            }
+        }
+
+        // If any alerts were triggered, notify users via email and push.
+        // We fire-and-forget (no await) so the ESP32 gets a fast response.
+        if (alerts.length > 0) {
+            const alertMessage = alerts.join('\n');
+            console.log('Triggering alerts:', alertMessage);
+
+            // Send email alert — iterates over all ALERT_EMAILS addresses
+            mailer.sendAlert('Sensor Alarm Alert', alertMessage);
+
+            // Push notification to all subscribed Android/Chrome devices
+            webpush.sendPushToAll('Home Check Alert', alertMessage);
+        }
 
         // Broadcast to SSE clients with the winning PIR state
         if (typeof broadcastFn === 'function') {
