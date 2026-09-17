@@ -1,7 +1,7 @@
 # 🏠 Home Check
 
 > **An ESP32 IoT sensor node + Google Cloud Run backend for remote home monitoring.**
-> Tracks temperature, humidity, and ambient light — and alerts you by **email** and **Android push notification** when something goes wrong.
+> Tracks temperature, humidity, ambient light, and air quality (TVOC) — and alerts you by **email** and **Android push notification** when something goes wrong.
 
 ---
 
@@ -47,6 +47,7 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 │  │   ESP32     │────────────────────────────────────┐   │
 │  │  + DHT22    │  X-Timestamp, X-Signature (HMAC)   │   │
 │  │  + LDR      │                                    │   │
+│  │  + AGS02MA  │                                    │   │
 │  │  + SR505    │◄───── PIR command in POST response  │   │
 │  └─────────────┘                                    │   │
 └─────────────────────────────────────────────────────│───┘
@@ -79,7 +80,7 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 
 ### Data Flow
 
-1. **Every 60 seconds** the ESP32 reads DHT22 (temperature + humidity), the LDR (light level), and the SR505 PIR (motion), adding the values to 30-sample circular buffers.
+1. **Every 60 seconds** the ESP32 reads DHT22 (temperature + humidity), the LDR (light level), the AGS02MA (TVOC/air quality via I2C), and the SR505 PIR (motion), adding the values to circular buffers.
 2. **Every 5 minutes** it computes min / max / avg over the rolling 30-minute window and POSTs a signed JSON payload to the Cloud Run endpoint.
 3. The server **verifies the HMAC-SHA256 signature** and the timestamp (replay-attack protection), validates the payload with Joi, stores it in Firestore, and broadcasts it to all open dashboard connections via **Server-Sent Events**.
 4. The server evaluates **alert thresholds**; if any are breached it sends an email and a Web Push notification instantly.
@@ -92,7 +93,7 @@ Detailed step-by-step guides are in the [`/docs`](./docs/) folder:
 
 | Feature | Details |
 |---|---|
-| 🌡️ Sensor data | Temperature (°C), Humidity (%), Light (ADC raw), Motion (PIR) |
+| 🌡️ Sensor data | Temperature (°C), Humidity (%), Light (ADC raw), TVOC (ppb), Motion (PIR) |
 | 📊 Rolling stats | Min / Max / Avg over the last 30 minutes |
 | 🔐 HMAC-SHA256 auth | Every ESP32 POST is signed; replays blocked within 5 min |
 | 📧 Email alerts | Nodemailer via SMTP; configurable recipient list |
@@ -114,7 +115,7 @@ home_check/
 ├── esp32-sensor/                     ← Arduino / PlatformIO sketch
 │   ├── esp32-sensor.ino              Main sketch (setup + loop)
 │   ├── SensorManager.h               Sensor abstraction header
-│   ├── SensorManager.cpp             DHT22 + LDR reading, circular buffer
+│   ├── SensorManager.cpp             DHT22 + LDR + AGS02MA reading, circular buffer
 │   ├── HttpClient.h                  HTTPS + HMAC signing header
 │   ├── HttpClient.cpp                WiFiClientSecure + mbedTLS implementation
 │   ├── config.h.example              ← copy to config.h and fill in values
@@ -161,6 +162,7 @@ home_check/
 | Microcontroller | **ESP32** (any variant) | ESP32-WROOM-32, ESP32-S3, etc. |
 | Temp + Humidity | **DHT22** (AM2302) | Connected to `GPIO4` (configurable) |
 | Light sensor | **LDR / photoresistor** | 10 kΩ pull-down to GND; signal to `GPIO34` (ADC) |
+| TVOC / Air quality | **AGS02MA** | I2C (SDA: `GPIO21`, SCL: `GPIO22`); address `0x1A`; 3.3V; ~2 min warm-up |
 | Motion sensor | **SR505 PIR** | Digital output to `GPIO14`; powered from 5V (VIN) |
 | Manual test button | **Momentary push button** | Between `GPIO13` and GND (active low, internal pull-up) |
 | PIR toggle button | **Momentary push button** | Between `GPIO27` and GND (active low, internal pull-up) |
@@ -182,6 +184,12 @@ GPIO34 ───►  LDR junction (LDR + 10kΩ voltage divider to GND)
              Top of divider → 3.3V
              LDR between 3.3V and GPIO34
              10kΩ resistor between GPIO34 and GND
+
+GPIO21 ───►  AGS02MA SDA  (+ 10kΩ pull-up to 3.3V)
+GPIO22 ───►  AGS02MA SCL  (+ 10kΩ pull-up to 3.3V)
+             AGS02MA VCC  → 3.3V
+             AGS02MA GND  → GND
+             I2C address: 0x1A (default)
 
 GPIO14 ───►  SR505 PIR OUT pin
              SR505 VCC  → VIN (5V)
@@ -388,7 +396,7 @@ The script prints the public service URL on success. Copy it into `config.h` on 
 5. Your subscription is stored in Firestore and receives a push notification whenever an alert fires or the watchdog triggers.
 6. To **install as a PWA**, tap the Chrome menu → "Add to Home screen".
 
-The dashboard shows three live line charts (Temperature, Humidity, Light) updated in real-time via Server-Sent Events, a PIR motion event log, and an **Activate/Deactivate PIR** button.
+The dashboard shows four live line charts (Temperature, Humidity, Light, TVOC) updated in real-time via Server-Sent Events, a PIR motion event log, and an **Activate/Deactivate PIR** button.
 
 ### PIR Remote Control
 
@@ -412,6 +420,7 @@ Configurable in `cloud-run-server/src/routes/data.js`:
 | Humidity | avg > **80 %** | Excessive moisture / mould risk |
 | Humidity | avg < **20 %** | Too dry |
 | Light (raw) | avg < **50** | Sustained darkness |
+| TVOC | avg > **450 ppb** | Poor air quality / VOC contamination |
 | Motion | PIR triggered | Intrusion / unexpected movement |
 | Watchdog | No data for **95 min** | ESP32 offline / power loss |
 

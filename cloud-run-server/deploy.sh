@@ -6,6 +6,13 @@
 # -o pipefail: Pipeline fails if any command in the pipe fails
 set -euo pipefail
 
+# Move to the directory containing this script (cloud-run-server/)
+# The build below uses --source . and needs the Dockerfile and package.json,
+# which live here. Without this, running the script from the repo root makes
+# Cloud Build fall back to buildpack detection and fail with
+# "No buildpack groups passed detection".
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 # Print a starting message to the console
 # This helps the user know the deployment has begun
 echo "Starting deployment of Home Check Server to Cloud Run..."

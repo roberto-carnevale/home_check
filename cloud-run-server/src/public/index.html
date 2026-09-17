@@ -107,12 +107,19 @@
             margin-bottom: 24px;
         }
 
-        /* Grid layout for the charts */
-        /* Uses CSS Grid to automatically place cards side by side on wide screens */
+        /* Grid layout for the charts: always two per row on a normal screen */
         .charts-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 24px;
+        }
+
+        /* Below this width two charts would be too cramped to read, so stack
+           them into a single column */
+        @media (max-width: 760px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         /* Card styling for each chart */
@@ -180,6 +187,65 @@
             border-bottom: 2px solid var(--card-bg);
             padding-bottom: 8px;
         }
+        .readings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 16px;
+            text-align: center;
+        }
+        .reading-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .reading-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .reading-value {
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        .reading-unit {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        /* PIR state lamp: red = enabled (watching), green = disabled */
+        .pir-lamp {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: var(--card-bg);
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .pir-lamp-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            /* Neutral until the real state is known, so the lamp never shows a
+               confident colour it has not confirmed with the server */
+            background: #6b7280;
+            flex-shrink: 0;
+        }
+        .pir-lamp.is-enabled .pir-lamp-dot {
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+        }
+        .pir-lamp.is-disabled .pir-lamp-dot {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
     </style>
 </head>
 <body>
@@ -190,7 +256,13 @@
         <!-- Flex layout keeps them aligned -->
         <header>
             <h1>Home Check</h1>
-            <div>
+            <div class="header-actions">
+                <!-- Lamp showing the PIR state at a glance: red when the PIR
+                     is enabled, green when it is disabled -->
+                <span class="pir-lamp" id="pirLamp" role="status" aria-live="polite">
+                    <span class="pir-lamp-dot" aria-hidden="true"></span>
+                    <span class="pir-lamp-text" id="pirLampText">PIR disabled</span>
+                </span>
                 <button id="pirToggleBtn" type="button">Enable PIR</button>
                 <button id="subscribeBtn" type="button">Subscribe to Notifications</button>
             </div>
@@ -200,7 +272,34 @@
         <!-- Updated via JavaScript when new SSE data arrives -->
         <div class="status" id="statusText">Waiting for data...</div>
 
-        <!-- Grid container for the three charts -->
+        <!-- Latest readings box -->
+        <div class="card latest-readings" id="latestReadings" style="margin-bottom: 24px;">
+            <h2>Latest Readings</h2>
+            <div class="readings-grid">
+                <div class="reading-item">
+                    <span class="reading-label">Temperature</span>
+                    <span class="reading-value" id="latestTemp">--</span>
+                    <span class="reading-unit">°C</span>
+                </div>
+                <div class="reading-item">
+                    <span class="reading-label">Humidity</span>
+                    <span class="reading-value" id="latestHumidity">--</span>
+                    <span class="reading-unit">%</span>
+                </div>
+                <div class="reading-item">
+                    <span class="reading-label">Light</span>
+                    <span class="reading-value" id="latestLight">--</span>
+                    <span class="reading-unit">raw</span>
+                </div>
+                <div class="reading-item">
+                    <span class="reading-label">TVOC</span>
+                    <span class="reading-value" id="latestTvoc">--</span>
+                    <span class="reading-unit">ppb</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grid container for the four charts -->
         <!-- Responsive layout adapts to screen size -->
         <div class="charts-grid">
             <!-- Temperature chart card -->
@@ -227,6 +326,15 @@
                 <h2>Light (Raw)</h2>
                 <div class="chart-container">
                     <canvas id="lightChart"></canvas>
+                </div>
+            </div>
+
+            <!-- TVOC chart card -->
+            <!-- Displays the TVOC (ppb) line graph from AGS02MA sensor -->
+            <div class="card">
+                <h2>TVOC (ppb)</h2>
+                <div class="chart-container">
+                    <canvas id="tvocChart"></canvas>
                 </div>
             </div>
         </div>

@@ -6,12 +6,25 @@ let PUBLIC_VAPID_KEY = '';
 let activePirEvents = [];
 let pirEnabled = false;
 
-function updatePirButton() {
+// Reflects the current PIR state in both the toggle button and the lamp.
+// Called from every place the state changes, so the two never disagree.
+function updatePirUi() {
     const button = document.getElementById('pirToggleBtn');
-    if (!button) return;
+    if (button) {
+        button.textContent = pirEnabled ? 'Deactivate PIR' : 'Activate PIR';
+        button.setAttribute('aria-pressed', String(pirEnabled));
+    }
 
-    button.textContent = pirEnabled ? 'Deactivate PIR' : 'Activate PIR';
-    button.setAttribute('aria-pressed', String(pirEnabled));
+    // Lamp: red when the PIR is enabled, green when it is disabled
+    const lamp = document.getElementById('pirLamp');
+    const lampText = document.getElementById('pirLampText');
+    if (lamp) {
+        lamp.classList.toggle('is-enabled', pirEnabled);
+        lamp.classList.toggle('is-disabled', !pirEnabled);
+    }
+    if (lampText) {
+        lampText.textContent = pirEnabled ? 'PIR enabled' : 'PIR disabled';
+    }
 }
 
 async function loadPirState() {
@@ -20,7 +33,7 @@ async function loadPirState() {
         if (!response.ok) throw new Error('Failed to load PIR state');
         const state = await response.json();
         pirEnabled = state.enabled === true;
-        updatePirButton();
+        updatePirUi();
     } catch (error) {
         console.error('Error loading PIR state:', error);
     }
@@ -128,10 +141,19 @@ const createChart = (ctx, color) => new Chart(ctx, {
 const tempChart = createChart(document.getElementById('tempChart').getContext('2d'), '#ef4444'); // Red for temp
 const humidityChart = createChart(document.getElementById('humidityChart').getContext('2d'), '#3b82f6'); // Blue for humidity
 const lightChart = createChart(document.getElementById('lightChart').getContext('2d'), '#f59e0b'); // Amber for light
+const tvocChart = createChart(document.getElementById('tvocChart').getContext('2d'), '#8b5cf6'); // Purple for TVOC
 
 // Maximum number of data points to keep in the chart for scrolling
 // 576 points corresponds to 48 hours of 5-minute interval data
 const MAX_POINTS = 600;
+
+// Helper to update the latest readings box
+const updateLatestReadings = (data) => {
+    document.getElementById('latestTemp').textContent = data.temperature.avg.toFixed(1);
+    document.getElementById('latestHumidity').textContent = data.humidity.avg.toFixed(1);
+    document.getElementById('latestLight').textContent = Math.round(data.light_raw.avg);
+    document.getElementById('latestTvoc').textContent = data.tvoc ? Math.round(data.tvoc.avg) : '--';
+};
 
 // Helper function to update a specific chart with a new data point
 // It pushes the new value and shifts old values out if necessary
@@ -181,7 +203,13 @@ async function fetchAndInitData() {
         if (!response.ok) throw new Error('Failed to load history');
         
         const data = await response.json();
-        
+
+        // Clear existing points first: this function also runs after an SSE
+        // reconnect, and appending to the old datasets would duplicate history.
+        [tempChart, humidityChart, lightChart, tvocChart].forEach(chart => {
+            chart.data.datasets[0].data = [];
+        });
+
         // Populate historical readings into the charts
         if (data.history && data.history.length > 0) {
             data.history.forEach(reading => {
@@ -191,6 +219,7 @@ async function fetchAndInitData() {
                 tempChart.data.datasets[0].data.push({ x: timestamp, y: reading.temperature.avg });
                 humidityChart.data.datasets[0].data.push({ x: timestamp, y: reading.humidity.avg });
                 lightChart.data.datasets[0].data.push({ x: timestamp, y: reading.light_raw.avg });
+                if (reading.tvoc) tvocChart.data.datasets[0].data.push({ x: timestamp, y: reading.tvoc.avg });
             });
 
             tempChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
@@ -199,17 +228,21 @@ async function fetchAndInitData() {
             humidityChart.options.scales.x.max = Date.now();
             lightChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
             lightChart.options.scales.x.max = Date.now();
+            tvocChart.options.scales.x.min = Date.now() - HISTORY_WINDOW_MS;
+            tvocChart.options.scales.x.max = Date.now();
 
             // Update charts after bulk inserts
             tempChart.update();
             humidityChart.update();
             lightChart.update();
+            tvocChart.update();
 
-            // Set last status message to the latest point
+            // Set last status message and latest readings to the most recent point
             const latest = data.history[data.history.length - 1];
             const timeLabel = new Date(latest.timestamp * 1000).toLocaleTimeString();
             document.getElementById('statusText').innerText =
                 `Last updated: ${timeLabel} (from history) | Device: ${latest.device_id}`;
+            updateLatestReadings(latest);
         } else {
             document.getElementById('statusText').innerText = 'No historical data found. Waiting for first message...';
         }
@@ -247,10 +280,13 @@ eventSource.onmessage = (event) => {
     document.getElementById('statusText').innerText =
         `Last updated: ${timeLabel} | Device: ${data.device_id}`;
 
+    // Update latest readings box
+    updateLatestReadings(data);
+
     // Sync PIR button with Firestore-confirmed state from server
     if (typeof data.pir_enabled === 'boolean') {
         pirEnabled = data.pir_enabled;
-        updatePirButton();
+        updatePirUi();
     }
 
     // Update all three charts with the new average values
@@ -259,6 +295,7 @@ eventSource.onmessage = (event) => {
     updateChart(tempChart, timestamp, data.temperature.avg);
     updateChart(humidityChart, timestamp, data.humidity.avg);
     updateChart(lightChart, timestamp, data.light_raw.avg);
+    if (data.tvoc) updateChart(tvocChart, timestamp, data.tvoc.avg);
 
     // If PIR motion was detected in this reading, dynamically add it to the log list
     if (data.motion_detected === true) {
@@ -289,6 +326,22 @@ eventSource.onerror = (err) => {
     document.getElementById('statusText').innerText = 'Connection lost. Reconnecting...';
 };
 
+// Track the first connection so we do not refetch what the initial load
+// already fetched.
+let sseConnectedOnce = false;
+
+// On every reconnect, reload the history. Readings that arrived while the
+// stream was down were never broadcast to this page, so without this the
+// dashboard would keep showing stale values indefinitely.
+eventSource.onopen = () => {
+    if (!sseConnectedOnce) {
+        sseConnectedOnce = true;
+        return;
+    }
+    console.log('SSE reconnected, refreshing history');
+    fetchAndInitData();
+};
+
 document.getElementById('pirToggleBtn').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     const nextState = !pirEnabled;
@@ -303,7 +356,7 @@ document.getElementById('pirToggleBtn').addEventListener('click', async (event) 
         if (!response.ok) throw new Error(`PIR update failed: ${response.status}`);
 
         pirEnabled = nextState;
-        updatePirButton();
+        updatePirUi();
         document.getElementById('statusText').innerText =
             `PIR ${pirEnabled ? 'activation' : 'deactivation'} requested. Waiting for device...`;
     } catch (error) {

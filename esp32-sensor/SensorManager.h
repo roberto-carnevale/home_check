@@ -6,8 +6,12 @@
 #define SENSOR_MANAGER_H
 
 #include <Arduino.h>
+#include <Wire.h>
 // DHT sensor library (Adafruit)
 #include <DHT.h>
+// AGS02MA TVOC sensor library (Adafruit). Handles the sensor's quirks:
+// the mandatory 20 kHz bus, the command delays and the ~1.5s refresh throttle.
+#include <Adafruit_AGS02MA.h>
 
 // Structure to hold min, max, and avg for a single metric
 struct SensorStats {
@@ -21,6 +25,8 @@ struct AllStats {
     SensorStats temp;
     SensorStats humidity;
     SensorStats light;
+    SensorStats tvoc;
+    bool tvocValid;   // false when no TVOC read succeeded in the window
     uint8_t sampleCount;
 };
 
@@ -29,7 +35,7 @@ class SensorManager {
 public:
     // Constructor initializes pins and window size
     // windowSize determines the capacity of the circular buffer
-    SensorManager(uint8_t dhtPin, uint8_t ldrPin, uint8_t pirPin, uint8_t windowSize);
+    SensorManager(uint8_t dhtPin, uint8_t ldrPin, uint8_t pirPin, uint8_t tvocAddr, uint8_t windowSize);
     
     // Destructor to clean up dynamically allocated memory
     ~SensorManager();
@@ -60,14 +66,24 @@ private:
     uint8_t _dhtPin;     // DHT sensor data pin
     uint8_t _ldrPin;     // LDR analog input pin
     uint8_t _pirPin;     // PIR digital input pin
+    uint8_t _tvocAddr;   // AGS02MA I2C address
     uint8_t _windowSize; // Maximum number of samples to store
 
-    DHT _dht; // Adafruit DHT instance
+    DHT _dht;                 // Adafruit DHT instance
+    Adafruit_AGS02MA _ags;    // Adafruit AGS02MA TVOC instance
+    bool _tvocReady;          // true once the AGS02MA answered at begin()
 
     // Pointers to dynamically allocated circular buffers
     float* _tempBuffer;
     float* _humidityBuffer;
     float* _lightBuffer;
+    float* _tvocBuffer;
+
+    // Reads TVOC ppb value from the AGS02MA; returns -1 if the read failed
+    int32_t readTvocPpb();
+
+    // Prints every responding I2C address; wiring diagnostic used at boot
+    void scanI2CBus();
 
     uint8_t _headIndex;    // Current index to insert new sample
     uint8_t _count;        // Total number of valid samples stored

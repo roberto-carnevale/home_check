@@ -10,6 +10,10 @@
 // Set these to match your local network
 #define WIFI_SSID     "your-wifi-ssid"
 #define WIFI_PASSWORD "your-wifi-password"
+// Give up on a connection attempt after this long instead of blocking forever
+#define WIFI_CONNECT_TIMEOUT_MS  20000UL
+// How long to wait before retrying once an attempt has failed
+#define WIFI_RETRY_INTERVAL_MS   30000UL
 
 // Server Configuration
 // Remote endpoint details for the Cloud Run instance
@@ -34,6 +38,17 @@
 #define LDR_PIN       34
 // SR505 PIR Motion Sensor digital input pin
 #define PIR_PIN       14
+// AGS02MA TVOC sensor over I2C
+#define TVOC_SDA_PIN   21   // I2C SDA (default ESP32 pin)
+#define TVOC_SCL_PIN   22   // I2C SCL (default ESP32 pin)
+#define AGS02MA_ADDR   0x1A // AGS02MA default I2C address
+// Bus speed and command timing are owned by the Adafruit_AGS02MA library
+// (it forces the slow ~20 kHz bus the sensor requires), so they are not
+// configured here.
+// The sensor refreshes its measurement about every 1.5s and refuses commands
+// sent while it is busy, so retry a few times before dropping the sample.
+#define TVOC_READ_ATTEMPTS   3
+#define TVOC_RETRY_DELAY_MS  1600
 // Button to toggle PIR monitoring on/off at runtime (active low, internal pull-up)
 #define PIR_TOGGLE_PIN 27
 // LED indicator: lit when PIR monitoring is active
@@ -42,6 +57,11 @@
 #define BUTTON_PIN    13
 // Mode switch pin: HIGH/floating = remote server, GND = local server
 #define MODE_SWITCH_PIN  19
+
+// ─── TVOC sensor (AGS02MA via I2C) ─────────────────────────
+#define TVOC_SDA_PIN   21   // I2C SDA (default ESP32 pin)
+#define TVOC_SCL_PIN   22   // I2C SCL (default ESP32 pin)
+#define AGS02MA_ADDR   0x1A // AGS02MA default I2C address
 
 // Timing and Interval Definitions
 // 2 minutes between environmental sensor samples (in milliseconds)

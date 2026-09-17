@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <Wire.h>
 #include "time.h"
 #include <ArduinoJson.h>
 
@@ -44,43 +45,86 @@ const unsigned long PIR_TOGGLE_LOCKOUT_MS = 250UL;
 bool pirEnabled = false;
 unsigned long pirUpdatedAt = 0; // Unix timestamp of last PIR toggle (physical or server)
 
-// Function to connect or reconnect to WiFi
-void connectWiFi() {
-    // Only connect if not already connected
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.print("[WIFI] Connecting to ");
-        Serial.println(WIFI_SSID);
+// WiFi and NTP state. Both are retried from loop() rather than blocking setup,
+// so the node still samples and responds to its buttons while offline.
+bool timeSynced = false;
+unsigned long lastWifiAttemptTime = 0;
+unsigned long lastTimeSyncAttempt = 0;
 
-        // Start connection process
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        
-        // Wait until connected, printing dots
-        while (WiFi.status() != WL_CONNECTED) {
-            delay(500);
-            Serial.print(".");
-        }
-        
-        // Connection successful, print IP address
-        Serial.println("\n[WIFI] Connected.");
-        Serial.print("[WIFI] IP address: ");
-        Serial.println(WiFi.localIP());
+// Translates a wl_status_t value into the reason the connection is failing,
+// so the cause is visible without guessing from a row of dots.
+const char* wifiStatusText(int status) {
+    switch (status) {
+        case WL_NO_SSID_AVAIL:   return "SSID not found (wrong name, or 5 GHz-only network)";
+        case WL_CONNECT_FAILED:  return "connection refused (wrong password)";
+        case WL_CONNECTION_LOST: return "connection lost";
+        case WL_DISCONNECTED:    return "disconnected (router not responding yet)";
+        case WL_IDLE_STATUS:     return "idle";
+        default:                 return "unknown";
     }
 }
 
-// Function to synchronize system time via NTP
-void syncTime() {
+// Connects or reconnects to WiFi, giving up after WIFI_CONNECT_TIMEOUT_MS.
+// Returns true when connected. This must never block indefinitely: loop()
+// calls it too, and an unattended node has to keep sampling and stay
+// responsive to its buttons even while the network is down.
+bool connectWiFi() {
+    // Nothing to do if the link is already up
+    if (WiFi.status() == WL_CONNECTED) {
+        return true;
+    }
+
+    Serial.print("[WIFI] Connecting to ");
+    Serial.println(WIFI_SSID);
+
+    // Force station mode and drop any stale association: the ESP32 keeps
+    // credentials in NVS and can otherwise keep retrying an old one.
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    // Wait for the link, printing dots, but only up to the timeout
+    unsigned long startedAt = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.printf("[WIFI] Failed after %lus, status %d (%s)\n",
+                      WIFI_CONNECT_TIMEOUT_MS / 1000,
+                      WiFi.status(), wifiStatusText(WiFi.status()));
+        return false;
+    }
+
+    // Connection successful, print IP address
+    Serial.println("[WIFI] Connected.");
+    Serial.print("[WIFI] IP address: ");
+    Serial.println(WiFi.localIP());
+    return true;
+}
+
+// Function to synchronize system time via NTP.
+// Returns true on success. The HMAC signature carries a timestamp the server
+// checks for freshness, so an unsynced clock makes every report be rejected.
+bool syncTime() {
     Serial.println("[WIFI] Syncing time via NTP...");
     // Configure time library with NTP server
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    
+
     // Struct to hold time info
     struct tm timeinfo;
     // Wait until time is obtained
     if (!getLocalTime(&timeinfo)) {
         Serial.println("[WIFI] Failed to obtain time");
-        return;
+        return false;
     }
     Serial.println("[WIFI] Time synchronized successfully.");
+    return true;
 }
 
 // Helper to get current UNIX timestamp (seconds since epoch)
@@ -135,6 +179,16 @@ void sendReport(unsigned long ts) {
         lightObj["min"] = stats.light.min;
         lightObj["max"] = stats.light.max;
         lightObj["avg"] = stats.light.avg;
+
+        // Add TVOC statistics object (ppb), but only when the AGS02MA actually
+        // answered during this window. The field is optional server-side, so
+        // omitting it shows "--" on the dashboard instead of a fake 0 ppb.
+        if (stats.tvocValid) {
+            JsonObject tvocObj = doc.createNestedObject("tvoc");
+            tvocObj["min"] = stats.tvoc.min;
+            tvocObj["max"] = stats.tvoc.max;
+            tvocObj["avg"] = stats.tvoc.avg;
+        }
 
         // Serialize JSON to string
         String jsonBody;
@@ -203,11 +257,16 @@ void setup() {
     Serial.print(port);
     Serial.println(SERVER_PATH);
 
-    // Connect to the selected WiFi network
-    connectWiFi();
-
-    // Synchronize time for HMAC signatures
-    syncTime();
+    // Connect to the selected WiFi network. A failure here is not fatal:
+    // loop() keeps retrying, and the sensors work regardless.
+    if (connectWiFi()) {
+        // Synchronize time for HMAC signatures
+        timeSynced = syncTime();
+    } else {
+        Serial.println("[WIFI] Continuing offline; will retry in the main loop.");
+    }
+    lastWifiAttemptTime = millis();
+    lastTimeSyncAttempt = lastWifiAttemptTime;
 
     // Configure the manual test button pin using internal pull-up
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -216,7 +275,7 @@ void setup() {
     digitalWrite(PIR_LED_PIN, LOW);
 
     // Instantiate SensorManager with config values
-    sensorMgr = new SensorManager(DHT_PIN, LDR_PIN, PIR_PIN, ROLLING_WINDOW);
+    sensorMgr = new SensorManager(DHT_PIN, LDR_PIN, PIR_PIN, AGS02MA_ADDR, ROLLING_WINDOW);
     // Initialize sensor hardware
     sensorMgr->begin();
 
@@ -229,10 +288,27 @@ void loop() {
     // Fetch current millis for scheduling
     unsigned long currentMillis = millis();
 
-    // Reconnect to WiFi if connection is lost
-    if (WiFi.status() != WL_CONNECTED) {
+    // Reconnect to WiFi if the link is down, but no more often than
+    // WIFI_RETRY_INTERVAL_MS: each attempt costs a blocking timeout, and
+    // retrying every pass would starve sampling and the button handling.
+    if (WiFi.status() != WL_CONNECTED &&
+        currentMillis - lastWifiAttemptTime >= WIFI_RETRY_INTERVAL_MS) {
+        lastWifiAttemptTime = currentMillis;
         Serial.println("[WIFI] Connection lost. Reconnecting...");
-        connectWiFi();
+        if (connectWiFi()) {
+            // The clock is lost across a long outage, so resync before the
+            // next report rather than signing it with a stale timestamp.
+            timeSynced = syncTime();
+        }
+    }
+
+    // Catch up on a time sync that failed earlier: without it every report
+    // would be signed with an epoch timestamp and rejected by the server.
+    // Rate-limited because getLocalTime() blocks for seconds when it fails.
+    if (!timeSynced && WiFi.status() == WL_CONNECTED &&
+        currentMillis - lastTimeSyncAttempt >= WIFI_RETRY_INTERVAL_MS) {
+        lastTimeSyncAttempt = currentMillis;
+        timeSynced = syncTime();
     }
 
     // Check if it's time to take a new environmental sensor sample

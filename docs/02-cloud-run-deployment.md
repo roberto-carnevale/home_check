@@ -372,7 +372,7 @@ VAPID_PRIVATE_KEY=home-check-vapid-private:latest,\
 VAPID_SUBJECT=home-check-vapid-subject:latest,\
 ALLOWED_ORIGIN=home-check-allowed-origin:latest" \
   --project=$PROJECT_ID
-```
+```i
 
 At the end of deployment you will see:
 

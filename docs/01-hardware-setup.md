@@ -1,6 +1,6 @@
 # Hardware Setup Guide
 
-> **Goal**: Wire the DHT22 temperature/humidity sensor and the LDR light sensor to your ESP32, install the required Arduino libraries, and flash the sketch for the first time.
+> **Goal**: Wire the DHT22 temperature/humidity sensor, the LDR light sensor, and the AGS02MA TVOC air quality sensor to your ESP32, install the required Arduino libraries, and flash the sketch for the first time.
 
 ---
 
@@ -9,9 +9,10 @@
 1. [Bill of Materials](#bill-of-materials)
 2. [Understanding the Circuits](#understanding-the-circuits)
 3. [Wiring the DHT22](#wiring-the-dht22)
-4. [Wiring the LDR (Light Sensor)](#wiring-the-ldr-light-sensor)
-5. [Wiring the Mode Switch (GPIO19)](#wiring-the-mode-switch-gpio19)
-6. [Full Wiring Diagram](#full-wiring-diagram)
+4. [Wiring the AGS02MA (TVOC Sensor)](#wiring-the-ags02ma-tvoc-sensor)
+5. [Wiring the LDR (Light Sensor)](#wiring-the-ldr-light-sensor)
+6. [Wiring the Mode Switch (GPIO19)](#wiring-the-mode-switch-gpio19)
+7. [Full Wiring Diagram](#full-wiring-diagram)
 7. [Arduino IDE Setup](#arduino-ide-setup)
 8. [Installing the ESP32 Board Package](#installing-the-esp32-board-package)
 9. [Installing Required Libraries](#installing-the-required-libraries)
@@ -29,8 +30,10 @@
 | 1 | **ESP32 development board** | NodeMCU ESP-32S v1.1 | 1 | Based on ESP-WROOM-32 module |
 | 2 | **DHT22 sensor** | AM2302 | 1 | Measures temperature + humidity |
 | 3 | **LDR (photoresistor)** | GL5528 or equivalent | 1 | 10–20 kΩ in darkness |
-| 4 | **Resistor** (DHT22 pull-up) | 10 kΩ | 1 | Between DHT22 DATA and VCC |
-| 5 | **Resistor** (LDR divider) | 10 kΩ | 1 | Between LDR junction and GND |
+| 4 | **AGS02MA TVOC sensor** | ASAIR AGS02MA | 1 | I2C TVOC gas sensor (0–100,000 ppb) |
+| 5 | **Resistor** (DHT22 pull-up) | 10 kΩ | 1 | Between DHT22 DATA and VCC |
+| 6 | **Resistor** (LDR divider) | 10 kΩ | 1 | Between LDR junction and GND |
+| 7 | **Resistors** (I2C pull-ups) | 10 kΩ | 2 | Between AGS02MA SDA/SCL and 3.3V |
 | 6 | **Breadboard** | Full-size (830 tie-points) | 1 | Or prototype PCB |
 | 7 | **Jumper wires** | Male–Male | ~10 | Assorted colours |
 | 8 | **USB cable** | Micro-USB or USB-C | 1 | Matches your ESP32 board |
@@ -131,6 +134,105 @@ No external resistors are required for the SR505 output pin.
 
 ---
 
+## Wiring the AGS02MA (TVOC Sensor)
+
+The AGS02MA is a MEMS TVOC (Total Volatile Organic Compounds) gas sensor that communicates over **I2C**. It measures the total concentration of volatile organic compounds in the air, reported in **ppb** (parts per billion).
+
+### Key Specifications
+
+| Parameter | Value |
+|---|---|
+| Supply voltage | 3.3V (do NOT use 5V) |
+| I2C address | 0x1A (default, factory-set) |
+| Measurement range | 0–100,000 ppb TVOC |
+| Warm-up time | ~2 minutes after power-on for stable readings |
+| I2C speed | **20 kHz** — the sensor does not ACK at the usual 100 kHz |
+
+### AGS02MA Pinout
+
+```
+AGS02MA (top view, pins facing down)
+┌───────────┐
+│           │
+│  AGS02MA  │
+│           │
+└─┬──┬──┬──┬┘
+  │  │  │  │
+ VCC SDA SCL GND
+```
+
+| AGS02MA Pin | Wire Colour (suggested) | ESP32 Destination |
+|---|---|---|
+| VCC | Red | 3.3V pin |
+| SDA | Yellow | GPIO21 (default I2C SDA) |
+| SCL | White | GPIO22 (default I2C SCL) |
+| GND | Black | GND pin |
+
+> ⚠️ **Double-check GND before powering up.** GND must go to a GND pin, never
+> to 5V. A miswired ground still lets the sensor acknowledge its I2C address,
+> so the bus scan finds it at 0x1A and everything looks connected — but no
+> register read ever completes and TVOC stays unavailable.
+
+### I2C Pull-up Resistors
+
+The I2C bus requires **pull-up resistors** on both SDA and SCL lines:
+- Connect a **10 kΩ resistor** between SDA (GPIO21) and 3.3V
+- Connect a **10 kΩ resistor** between SCL (GPIO22) and 3.3V
+
+> **Note**: Some AGS02MA breakout boards include on-board pull-ups. If yours does, external resistors are not needed. Check the module documentation.
+
+### Diagnosing TVOC problems
+
+On boot the sketch initialises the sensor and, if that fails, scans the whole
+I2C bus. Read the Serial Monitor at 115200 baud:
+
+- `AGS02MA initialised at 0x1A, firmware 0x…` — working. The firmware version
+  is read over I2C, so a non-zero value here proves a full command/response
+  cycle, not just that the address answered.
+- `answers at 0x1A but register reads fail (firmware version 0)` — the
+  address ACKs but no data transfer completes. This is a wiring fault, not a
+  configuration one; see the checklist below.
+- `no I2C devices at all` — nothing on the bus. Check 3.3V and GND, make sure
+  SDA and SCL are not swapped, and add the 10 kΩ pull-ups if the breakout has
+  none.
+- `device found at 0x..` at some other address — the sensor works but is
+  factory-set to a different address. Put that value in `AGS02MA_ADDR` in
+  `config.h`.
+- `No valid reading after N attempts` — the sensor initialised but is not
+  returning data. Expect this during the ~2 minute warm-up after power-on; if
+  it persists, the bus is marginal (shorten the wires, check the pull-ups).
+
+When a read fails the TVOC field is omitted from the payload, so the
+dashboard shows `--` rather than a fake 0 ppb.
+
+#### When the address answers but reads fail
+
+An address probe is a single byte; a register read is a multi-byte exchange.
+A sensor that is powered incorrectly, or a bus that is electrically marginal,
+passes the first and fails the second — which is why the sensor can look
+present and still return nothing. Check in this order:
+
+1. **Power and ground.** Confirm GND goes to a GND pin and VCC to 3.3V. A GND
+   lead landing on 5V produces exactly this symptom: the sensor is found at
+   0x1A, every read returns 0. This is the fault that caused it here.
+2. **Missing pull-up resistors.** The ESP32's internal pull-ups (~45 kΩ) are
+   weak enough to pass an address ACK and fail a real transfer. Fit the 10 kΩ
+   resistors from SDA to 3.3V and SCL to 3.3V (item 7 in the BOM).
+3. **Wire length.** Breadboard jumpers over ~10 cm add enough capacitance to
+   matter. Shorten them.
+4. **Prove the bus.** Wire any other I2C device to the same two pins. If it
+   also fails to read, the problem is the bus, not the AGS02MA.
+
+### CRC Verification
+
+Each I2C read returns 5 bytes: 4 data bytes + 1 CRC-8 checksum (polynomial 0x31, init 0xFF). The Adafruit driver verifies the CRC and discards invalid readings, so occasional I2C errors do not corrupt the data.
+
+### Warm-up Period
+
+The AGS02MA requires approximately **2 minutes** of warm-up after power-on before its readings stabilize. The first few TVOC readings may be higher than normal — this is expected behaviour. The rolling min/max/avg statistics buffer absorbs this transient naturally.
+
+---
+
 ## Wiring the LDR (Light Sensor)
 
 The LDR itself has **no polarity** — either leg can go in either direction.
@@ -172,10 +274,10 @@ NodeMCU ESP-32S v1.1 (38-pin, viewed from above)
                    ┌─────────────────────────────┐
              3V3 ─►│ [■] 3V3             GND [■] ◄─── GND
               EN ──│ [ ] EN           GPIO23 [ ] │
-          GPIO36 ──│ [ ] SENSOR_VP    GPIO22 [ ] │
+          GPIO36 ──│ [ ] SENSOR_VP    GPIO22 [■] ◄─── AGS02MA SCL
           GPIO39 ──│ [ ] SENSOR_VN    GPIO01 [ ] ◄─── TXD0
   ADC ──► GPIO34 ──│ [■] GPIO34       GPIO03 [ ] ◄─── RXD0
-          GPIO35 ──│ [ ] GPIO35       GPIO21 [ ] │
+          GPIO35 ──│ [ ] GPIO35       GPIO21 [■] ◄─── AGS02MA SDA
           GPIO32 ──│ [ ] GPIO32          GND [■] ◄─── GND
           GPIO33 ──│ [ ] GPIO33       GPIO19 [■] ◄─── MODE SWITCH
           GPIO25 ──│ [ ] GPIO25       GPIO18 [ ] │
@@ -204,6 +306,26 @@ DHT22 / AM2302 CONNECTIONS
   ESP32 GPIO4 ────────────────┴─── DHT22 DATA (pin 2)
 
   ESP32 GND  ─────────────────────── DHT22 GND (pin 4)
+
+═══════════════════════════════════════════════════════════════════
+AGS02MA TVOC SENSOR CONNECTIONS (I2C)
+═══════════════════════════════════════════════════════════════════
+
+  ESP32 3V3    ────────┬──────────────── AGS02MA VCC
+                       │
+                    [10kΩ]  ← SDA pull-up
+                       │
+  ESP32 GPIO21 ────────┴──────────────── AGS02MA SDA
+
+  ESP32 3V3    ────────┬
+                       │
+                    [10kΩ]  ← SCL pull-up
+                       │
+  ESP32 GPIO22 ────────┴──────────────── AGS02MA SCL
+
+  ESP32 GND    ──────────────────────── AGS02MA GND
+
+  I2C Address: 0x1A (factory default)
 
 ═══════════════════════════════════════════════════════════════════
 SR505 PIR CONNECTIONS
@@ -323,7 +445,7 @@ The official Espressif board package adds ESP32 support to Arduino IDE.
 
 ## Installing Required Libraries
 
-Install these three libraries via **Tools → Manage Libraries**:
+Install these four libraries via **Tools → Manage Libraries**:
 
 ### 1. DHT sensor library (Adafruit)
 
@@ -346,7 +468,18 @@ Usually installed automatically above. If not:
 3. Click the **version dropdown** and select the latest **6.x.x** release.
 4. Click **Install**.
 
-**Verify installed libraries** via **Sketch → Include Library → Manage Libraries** — all three should show a tick mark.
+### 4. Adafruit AGS02MA
+
+Required for the TVOC sensor. Do not hand-roll the I2C access: the AGS02MA
+only works on a slow (~20 kHz) bus and needs specific command delays, all of
+which this driver handles.
+
+1. Search for **`Adafruit AGS02MA`**.
+2. Find **"Adafruit AGS02MA" by Adafruit** — click **Install**.
+3. When prompted to install dependencies, click **"Install All"** (this pulls
+   in Adafruit BusIO).
+
+**Verify installed libraries** via **Sketch → Include Library → Manage Libraries** — all four should show a tick mark.
 
 ---
 
@@ -387,6 +520,11 @@ Open `config.h` and fill in:
 #define PIR_PIN        14   // SR505 PIR motion sensor output
 #define PIR_TOGGLE_PIN 27   // Button to toggle PIR monitoring on/off
 #define PIR_LED_PIN    2    // LED lit when PIR monitoring is active
+
+// ─── TVOC sensor (AGS02MA via I2C) ─────────────────────────
+#define TVOC_SDA_PIN   21   // I2C SDA (default ESP32 pin)
+#define TVOC_SCL_PIN   22   // I2C SCL (default ESP32 pin)
+#define AGS02MA_ADDR   0x1A // AGS02MA default I2C address
 
 // ─── Timing ──────────────────────────────────────────────────
 #define SAMPLE_INTERVAL_MS         60000UL  // read sensors every 60 s
@@ -470,8 +608,10 @@ You should see output like:
 [WIFI] Syncing time via NTP...
 [WIFI] Time synchronized successfully.
 [MODE] REMOTE server selected (GPIO19 HIGH)
-[SENSOR] Taking sample...
-[SENSOR] Sample successful.
+[TVOC] AGS02MA initialised at 0x1A, firmware 0x18086001
+[SENSOR] Taking environmental sample...
+[SENSOR] Temp: 26.6°C | Humidity: 54.9% | Light: 3485 | TVOC: 100 ppb
+[SENSOR] Environmental sample successful.
 ...
 [HTTP] Preparing report...
 [HTTP] Payload: {"device_id":"esp32-home-01","timestamp":1721308800,"window_minutes":30,...}
@@ -486,7 +626,8 @@ You should see output like:
 |---|---|
 | `[WIFI]` | WiFi connection, NTP time sync |
 | `[MODE]` | Server mode selection (LOCAL or REMOTE) based on GPIO19 |
-| `[SENSOR]` | DHT22 / LDR / PIR read, sample stored |
+| `[SENSOR]` | DHT22 / LDR / AGS02MA / PIR read, sample stored |
+| `[TVOC]` | AGS02MA init result, firmware version, I2C bus scan and read failures |
 | `[PIR]` | PIR monitoring toggle, motion events, remote command polling |
 | `[HTTP]` | HTTP/HTTPS POST, response code, PIR command polling |
 
@@ -495,7 +636,12 @@ You should see output like:
 | Message | Cause | Fix |
 |---|---|---|
 | `Failed to read from DHT sensor!` | Bad wiring or missing pull-up resistor | Check DHT22 wiring; add 10 kΩ pull-up |
+| `[TVOC] ... register reads fail (firmware version 0)` | Sensor ACKs its address but no read completes — usually GND or VCC miswired | Check GND to GND and VCC to 3.3V, then the SDA/SCL pull-ups |
+| `[TVOC] No valid reading after N attempts` | Sensor still warming up, or a marginal bus | Wait ~2 min after power-on; if it persists, shorten wires |
 | `[WIFI] Connection lost. Reconnecting...` | Intermittent WiFi | Normal; the sketch auto-reconnects |
+| `[WIFI] Failed after 20s, status 1 (SSID not found...)` | Wrong SSID, or the network is 5 GHz-only | The ESP32 is 2.4 GHz only; check `WIFI_SSID` and that the band is enabled |
+| `[WIFI] Failed after 20s, status 4 (connection refused...)` | Wrong password | Check `WIFI_PASSWORD` in `config.h` |
+| `[WIFI] Failed after 20s, status 6 (disconnected...)` | Router not answering, or weak signal | Move the node closer; check the router is up |
 | `[HTTP] Unable to connect to server` | Wrong `SERVER_HOST` or TLS cert issue | Verify `config.h`; check `ROOT_CA_CERT` |
 | `POST Result Code: 401` | Wrong HMAC secret | Ensure `HMAC_SECRET` matches server `HMAC_SECRET_KEY` |
 | `POST Result Code: 400` | Payload validation failed | Check ArduinoJson v6 is installed |
@@ -509,6 +655,24 @@ You should see output like:
 - The 10 kΩ pull-up resistor is missing or connected incorrectly.
 - The sensor is connected to a 5 V pin — use 3.3 V only.
 - The DHT22 needs at least 2 seconds between readings; the sketch enforces this via `SAMPLE_INTERVAL_MS`.
+
+### AGS02MA reports no reading
+
+Read the boot line in the Serial Monitor first — it tells you which half of
+the problem you have. `firmware 0x…` with a non-zero value means the sensor
+talks properly and anything wrong is downstream; `firmware version 0` means
+no read ever completes.
+
+- **Check GND and VCC before anything else.** GND to a GND pin, VCC to 3.3V
+  (not 5V). A GND lead on 5V still lets the sensor ACK its address, so it is
+  found at 0x1A while every read fails.
+- Check that **10 kΩ pull-up resistors** are present on both SDA (GPIO21) and SCL (GPIO22) to 3.3V.
+- Verify the I2C address is correct (0x1A). The sketch scans the bus automatically when init fails.
+- The sensor needs ~2 minutes of warm-up after power-on.
+- On a noisy bus, use short wires and keep them away from motor/relay signals.
+
+A failed read is never reported as 0 ppb: the TVOC field is omitted from the
+payload instead, and the dashboard shows `--`.
 
 ### LDR always reads 0 or 4095
 

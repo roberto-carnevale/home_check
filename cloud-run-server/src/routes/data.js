@@ -18,7 +18,8 @@ const THRESHOLDS = {
     tempLow: 5,      // Trigger alert if temp drops below 5°C
     humidityHigh: 80, // Trigger alert if humidity exceeds 80%
     humidityLow: 20,  // Trigger alert if humidity drops below 20%
-    lightLow: 50      // Trigger alert if light is persistently low (power outage?)
+    lightLow: 50,     // Trigger alert if light is persistently low (power outage?)
+    tvocHigh: 450     // Trigger alert if TVOC exceeds 450 ppb (poor air quality)
 };
 
 // Module-level reference to the SSE broadcast function.
@@ -81,6 +82,9 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         }
         if (data.humidity.avg < THRESHOLDS.humidityLow) {
             alerts.push(`Low Humidity Alert: ${data.humidity.avg.toFixed(1)}%`);
+        }
+        if (data.tvoc && data.tvoc.avg > THRESHOLDS.tvocHigh) {
+            alerts.push(`High TVOC Alert: ${data.tvoc.avg.toFixed(0)} ppb — poor air quality`);
         }
 
         // Process PIR motion

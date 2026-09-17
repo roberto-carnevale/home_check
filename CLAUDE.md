@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Home Check is an ESP32 IoT sensor node + Google Cloud Run backend for remote home monitoring. An ESP32 with DHT22 (temperature/humidity), LDR (light), and SR505 PIR (motion) sensors POSTs signed JSON payloads every 5 minutes to a Node.js Express server on Cloud Run. The server stores data in Firestore, streams it to a PWA dashboard via SSE, and sends email/push alerts when thresholds are breached or the device goes offline.
+Home Check is an ESP32 IoT sensor node + Google Cloud Run backend for remote home monitoring. An ESP32 with DHT22 (temperature/humidity), LDR (light), AGS02MA (TVOC/air quality), and SR505 PIR (motion) sensors POSTs signed JSON payloads every 5 minutes to a Node.js Express server on Cloud Run. The server stores data in Firestore, streams it to a PWA dashboard via SSE, and sends email/push alerts when thresholds are breached or the device goes offline.
 
 ## Commands
 
@@ -23,7 +23,7 @@ Deploy: `./deploy.sh` (requires `GOOGLE_CLOUD_PROJECT` and secrets as env vars)
 
 Two independent components share an HMAC secret:
 
-- **`esp32-sensor/`** — Arduino/PlatformIO C++ sketch. Reads sensors into circular buffers, computes rolling min/max/avg, POSTs HMAC-signed JSON to the server. A **mode switch on GPIO19** (with internal pull-up) selects the target at boot: floating/HIGH → remote Cloud Run (HTTPS), tied to GND → local dev server (plain HTTP). Config files (`config.h`, `secrets.h`) are gitignored.
+- **`esp32-sensor/`** — Arduino/PlatformIO C++ sketch. Reads sensors into circular buffers, computes rolling min/max/avg, POSTs HMAC-signed JSON to the server. Sensors: DHT22 (temp/humidity on GPIO4), LDR (light on GPIO34), AGS02MA (TVOC via I2C on SDA/SCL GPIO21/22, address 0x1A), SR505 PIR (motion on GPIO14). A **mode switch on GPIO19** (with internal pull-up) selects the target at boot: floating/HIGH → remote Cloud Run (HTTPS), tied to GND → local dev server (plain HTTP). Config files (`config.h`, `secrets.h`) are gitignored.
 
 - **`cloud-run-server/`** — Node.js 20 + Express. Entry point: `src/index.js`.
 
@@ -57,7 +57,7 @@ Two independent components share an HMAC secret:
 
 ### Alert Thresholds
 
-Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity >80% or <20%, light <50 raw units, plus motion detection.
+Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity >80% or <20%, light <50 raw units, TVOC >450 ppb, plus motion detection.
 
 ## Environment
 
@@ -76,6 +76,7 @@ Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity 
   "temperature": { "min": "number", "max": "number", "avg": "number" },
   "humidity": { "min": "number", "max": "number", "avg": "number" },
   "light_raw": { "min": "number", "max": "number", "avg": "number" },
+  "tvoc": { "min": "number", "max": "number", "avg": "number (optional, ppb)" },
   "motion_detected": "boolean (optional)",
   "pir_enabled": "boolean (optional)",
   "pir_updated_at": "integer (optional, unix seconds of last PIR toggle)"

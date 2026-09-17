@@ -26,7 +26,8 @@ describe('Validation Middleware', () => {
             window_minutes: 30,
             temperature: { min: 20, max: 25, avg: 22.5 },
             humidity: { min: 40, max: 50, avg: 45 },
-            light_raw: { min: 100, max: 200, avg: 150 }
+            light_raw: { min: 100, max: 200, avg: 150 },
+            tvoc: { min: 50, max: 300, avg: 120 }
         };
 
         // Send the request to the mock server

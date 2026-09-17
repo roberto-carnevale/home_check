@@ -41,6 +41,13 @@ const schema = Joi.object({
         avg: Joi.number().required()
     }).required(),
 
+    // TVOC (Total Volatile Organic Compounds) from AGS02MA sensor in ppb
+    tvoc: Joi.object({
+        min: Joi.number().required(),
+        max: Joi.number().required(),
+        avg: Joi.number().required()
+    }).optional(),
+
     // Optional motion detection flag from SR505 PIR sensor
     motion_detected: Joi.boolean().optional(),
 
