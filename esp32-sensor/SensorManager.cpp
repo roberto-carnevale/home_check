@@ -10,6 +10,7 @@
 SensorManager::SensorManager(uint8_t dhtPin, uint8_t ldrPin, uint8_t pirPin, uint8_t tvocAddr, uint8_t windowSize)
     : _dhtPin(dhtPin), _ldrPin(ldrPin), _pirPin(pirPin), _tvocAddr(tvocAddr), _windowSize(windowSize),
       _dht(dhtPin, DHT_TYPE), _tvocReady(false),
+      _last{0.0f, 0.0f, 0.0f, -1.0f, false},
       _headIndex(0), _count(0), _motionDetected(false) {
 
     // Allocate memory for temperature samples
@@ -113,6 +114,9 @@ bool SensorManager::takeSample() {
     _lightBuffer[_headIndex] = l;
     _tvocBuffer[_headIndex] = tvoc;
 
+    // Keep the raw sample for the display
+    _last = {t, h, l, tvoc, true};
+
     // Advance head index circularly
     _headIndex = (_headIndex + 1) % _windowSize;
 
@@ -163,6 +167,12 @@ void SensorManager::clearMotionFlag() {
 // Returns true if buffer has at least 1 reading
 bool SensorManager::hasEnoughData() const {
     return _count > 0;
+}
+
+// getLastReading() implementation
+// Returns the most recent raw sample for the live display
+LastReading SensorManager::getLastReading() const {
+    return _last;
 }
 
 // getStats() implementation

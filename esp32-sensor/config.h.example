@@ -38,6 +38,14 @@
 #define LDR_PIN       34
 // SR505 PIR Motion Sensor digital input pin
 #define PIR_PIN       14
+// TM1637 4-digit 7-segment display (VCC 5V, GND, DIO, CLK)
+#define TM1637_CLK_PIN  25   // GPIO connected to module CLK
+#define TM1637_DIO_PIN  26   // GPIO connected to module DIO
+#define DISPLAY_BRIGHTNESS  5    // 0 = dimmest, 7 = brightest
+#define DISPLAY_ROTATE_INTERVAL_MS  5000UL  // seconds per screen
+// Above this the reading no longer fits in three digits and the display
+// falls back to "lo q" (low quality)
+#define DISPLAY_TVOC_MAX_PPB  999
 // AGS02MA TVOC sensor over I2C
 #define TVOC_SDA_PIN   21   // I2C SDA (default ESP32 pin)
 #define TVOC_SCL_PIN   22   // I2C SCL (default ESP32 pin)

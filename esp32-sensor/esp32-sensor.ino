@@ -12,6 +12,7 @@
 #include "config.h"
 #include "SensorManager.h"
 #include "HttpClient.h"
+#include "DisplayManager.h"
 
 // NTP server for time synchronization
 const char* ntpServer = "pool.ntp.org";
@@ -20,9 +21,10 @@ const long  gmtOffset_sec = 0;
 // No daylight savings adjustment for strict UNIX timestamps
 const int   daylightOffset_sec = 0;
 
-// Global instances for sensor and HTTP clients
+// Global instances for sensor, HTTP and display
 SensorManager* sensorMgr;
 HttpClient* httpClient;
+DisplayManager* displayMgr;
 
 
 // Variables to track scheduling without using blocking delays
@@ -279,6 +281,10 @@ void setup() {
     // Initialize sensor hardware
     sensorMgr->begin();
 
+    // Instantiate and start the rotating 7-segment display
+    displayMgr = new DisplayManager(TM1637_CLK_PIN, TM1637_DIO_PIN, DISPLAY_BRIGHTNESS);
+    displayMgr->begin();
+
     // Instantiate HttpClient with selected server
     httpClient = new HttpClient(host, port, SERVER_PATH, HMAC_SECRET, caCert);
 }
@@ -319,10 +325,18 @@ void loop() {
         // Read from DHT and LDR and store in circular buffer
         if (sensorMgr->takeSample()) {
             Serial.println("[SENSOR] Environmental sample successful.");
+
+            // Push the fresh values to the display
+            LastReading latest = sensorMgr->getLastReading();
+            displayMgr->setReadings(latest.temp, latest.humidity,
+                                    latest.tvoc, latest.tvoc >= 0.0f);
         } else {
             Serial.println("[SENSOR] Environmental sample failed.");
         }
     }
+
+    // Advance the display rotation; returns immediately when it is not due
+    displayMgr->update(currentMillis);
 
     // Toggle PIR monitoring on/off using GPIO27
     int toggleButtonState = digitalRead(PIR_TOGGLE_PIN);

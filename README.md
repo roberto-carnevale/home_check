@@ -115,6 +115,7 @@ home_check/
 ├── esp32-sensor/                     ← Arduino / PlatformIO sketch
 │   ├── esp32-sensor.ino              Main sketch (setup + loop)
 │   ├── SensorManager.h               Sensor abstraction header
+│   ├── DisplayManager.cpp            TM1637 display, rotating readings
 │   ├── SensorManager.cpp             DHT22 + LDR + AGS02MA reading, circular buffer
 │   ├── HttpClient.h                  HTTPS + HMAC signing header
 │   ├── HttpClient.cpp                WiFiClientSecure + mbedTLS implementation
@@ -166,7 +167,8 @@ home_check/
 | Motion sensor | **SR505 PIR** | Digital output to `GPIO14`; powered from 5V (VIN) |
 | Manual test button | **Momentary push button** | Between `GPIO13` and GND (active low, internal pull-up) |
 | PIR toggle button | **Momentary push button** | Between `GPIO27` and GND (active low, internal pull-up) |
-| PIR status LED | **LED + resistor** | On `GPIO26`; lit when PIR monitoring is active |
+| PIR status LED | **LED + resistor** | On `GPIO2`; lit when PIR monitoring is active |
+| 7-segment display | **TM1637** (4 digits, centre colon) | CLK: `GPIO25`, DIO: `GPIO26`; powered from 5V (VIN) |
 | Mode switch | **SPDT switch or jumper** | `GPIO19` to GND = local dev; floating/HIGH = remote Cloud Run |
 | Power | USB or 5V adapter | For continuous operation |
 
@@ -194,6 +196,12 @@ GPIO22 ───►  AGS02MA SCL  (+ 10kΩ pull-up to 3.3V)
 GPIO14 ───►  SR505 PIR OUT pin
              SR505 VCC  → VIN (5V)
              SR505 GND  → GND
+
+GPIO25 ───►  TM1637 CLK
+GPIO26 ───►  TM1637 DIO
+             TM1637 VCC → VIN (5V)
+             TM1637 GND → GND
+             Not an I2C device: no pull-ups needed
 
 GPIO13 ───►  Push button (one pin)
              Other pin   → GND (uses internal pull-up)

@@ -20,6 +20,16 @@ struct SensorStats {
     float avg;
 };
 
+// Most recent raw sample, used by the live display. The rolling averages in
+// AllStats span 30 minutes and are far too sluggish to show on screen.
+struct LastReading {
+    float temp;
+    float humidity;
+    float light;
+    float tvoc;   // -1 when the last TVOC read failed
+    bool valid;   // false until the first successful sample
+};
+
 // Structure to hold all statistics plus sample count
 struct AllStats {
     SensorStats temp;
@@ -56,6 +66,9 @@ public:
     // Checks if we have at least one valid sample in the buffer
     bool hasEnoughData() const;
 
+    // Returns the most recent sample, for live display purposes
+    LastReading getLastReading() const;
+
     // Returns if motion was detected since the last reset
     bool isMotionDetected() const;
 
@@ -84,6 +97,8 @@ private:
 
     // Prints every responding I2C address; wiring diagnostic used at boot
     void scanI2CBus();
+
+    LastReading _last;     // Most recent sample, for the display
 
     uint8_t _headIndex;    // Current index to insert new sample
     uint8_t _count;        // Total number of valid samples stored

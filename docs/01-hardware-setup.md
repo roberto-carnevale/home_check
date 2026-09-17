@@ -12,7 +12,8 @@
 4. [Wiring the AGS02MA (TVOC Sensor)](#wiring-the-ags02ma-tvoc-sensor)
 5. [Wiring the LDR (Light Sensor)](#wiring-the-ldr-light-sensor)
 6. [Wiring the Mode Switch (GPIO19)](#wiring-the-mode-switch-gpio19)
-7. [Full Wiring Diagram](#full-wiring-diagram)
+7. [Wiring the TM1637 Display](#wiring-the-tm1637-display)
+8. [Full Wiring Diagram](#full-wiring-diagram)
 7. [Arduino IDE Setup](#arduino-ide-setup)
 8. [Installing the ESP32 Board Package](#installing-the-esp32-board-package)
 9. [Installing Required Libraries](#installing-the-required-libraries)
@@ -42,6 +43,7 @@
 | 11 | **Momentary push button** (PIR toggle) | Normally open | 1 | GPIO27 to GND; toggles PIR monitoring on/off |
 | 12 | **LED** (PIR status) | 3mm or 5mm, any colour | 1 | GPIO2; lit when PIR monitoring is active |
 | 13 | **Resistor** (LED current limiting) | 220-470 ohm | 1 | In series with the LED |
+| 14 | **4-digit 7-segment display** | TM1637 module (clock style, centre colon) | 1 | 5V; CLK on GPIO25, DIO on GPIO26 |
 
 > **Tip**: The DHT22 is more accurate than the DHT11 (+-0.5 C vs +-2 C) and measures a wider humidity range. Always prefer DHT22 for a home-monitoring application.
 
@@ -265,6 +267,44 @@ To switch to local mode, connect GPIO19 to GND with a jumper wire or a simple to
 
 ---
 
+## Wiring the TM1637 Display
+
+The 4-digit 7-segment module shows the current readings on the device itself,
+cycling to the next one every 5 seconds. It is not an I2C device despite
+having two data lines, so it does not share the AGS02MA bus and needs no
+pull-up resistors.
+
+| TM1637 Pin | Wire Colour (suggested) | ESP32 Destination |
+|---|---|---|
+| VCC | Red | 5V (VIN) |
+| GND | Black | GND pin |
+| DIO | Green | GPIO26 |
+| CLK | Blue | GPIO25 |
+
+> **Note**: This module runs from **5V**, unlike the DHT22 and AGS02MA which
+> must be on 3.3V. Take the supply from the board's VIN/5V pin.
+
+### What each screen shows
+
+| Order | Screen | Example | Meaning |
+|---|---|---|---|
+| 1 | Temperature | `26°C` | Rounded to whole degrees; below zero shows as `-5°C` |
+| 2 | Humidity | `54rh` | Relative humidity in percent |
+| 3 | Air quality | `100q` | TVOC in ppb, right-aligned over three digits |
+
+Two special cases on the air quality screen:
+
+- `lo q` — the reading is above 999 ppb, which no longer fits in three
+  digits, so the display falls back to "low quality".
+- `-- q` — no TVOC reading is available (sensor warming up or faulting).
+  This is deliberately distinct from `lo q`, so a broken sensor is never
+  mistaken for bad air.
+
+The clock colon in the middle of the module is left unlit; none of the three
+screens is a time value.
+
+---
+
 ## Full Wiring Diagram
 
 ```
@@ -273,27 +313,32 @@ NodeMCU ESP-32S v1.1 (38-pin, viewed from above)
 
                    ┌─────────────────────────────┐
              3V3 ─►│ [■] 3V3             GND [■] ◄─── GND
-              EN ──│ [ ] EN           GPIO23 [ ] │
+              EN ──│ [ ] EN            GPIO23 [ ] │
           GPIO36 ──│ [ ] SENSOR_VP    GPIO22 [■] ◄─── AGS02MA SCL
           GPIO39 ──│ [ ] SENSOR_VN    GPIO01 [ ] ◄─── TXD0
-  ADC ──► GPIO34 ──│ [■] GPIO34       GPIO03 [ ] ◄─── RXD0
+  LDR ──► GPIO34 ──│ [■] GPIO34       GPIO03 [ ] ◄─── RXD0
           GPIO35 ──│ [ ] GPIO35       GPIO21 [■] ◄─── AGS02MA SDA
           GPIO32 ──│ [ ] GPIO32          GND [■] ◄─── GND
           GPIO33 ──│ [ ] GPIO33       GPIO19 [■] ◄─── MODE SWITCH
-          GPIO25 ──│ [ ] GPIO25       GPIO18 [ ] │
-          GPIO26 ──│ [ ] GPIO26       GPIO05 [ ] │
-  INSERIM GPIO27 ──│ [■] GPIO27       GPIO17 [ ] │
+ TM1637 ► GPIO25 ──│ [■] GPIO25       GPIO18 [ ] │
+ TM1637 ► GPIO26 ──│ [■] GPIO26       GPIO05 [ ] │
+PIRBTN ─► GPIO27 ──│ [■] GPIO27       GPIO17 [ ] │
   PIR ──► GPIO14 ──│ [■] GPIO14       GPIO16 [ ] │
-          GPIO12 ──│ [ ] GPIO12       GPIO04 [■] ◄─── DHT DATA
-             GND ──│ [■] GND          GPIO02 [ ] ─── LED
- BUTTON──►GPIO13 ──│ [■] GPIO13       GPIO15 [ ] │
-             SD2 ──│ [ ] SD2             SD1 [ ] ─── MOSI
-             SD3 ──│ [ ] SD3             SD0 [ ] ─── MISO
-             CMD ──│ [ ] CMD             CLK [ ] ─── SCK
-    5V ──►   VIN ──│ [■] VIN/5V          SD3 [ ] ─── FLASH
+          GPIO12 ──│ [ ] GPIO12       GPIO04 [■] ◄─── DHT22 DATA
+             GND ──│ [■] GND          GPIO00 [ ] ◄─── BOOT
+BUTTON ─► GPIO13 ──│ [■] GPIO13       GPIO02 [■] ◄─── PIR LED
+             SD2 ──│ [ ] SD2          GPIO15 [ ] │
+             SD3 ──│ [ ] SD3             SD1 [ ] │
+             CMD ──│ [ ] CMD             SD0 [ ] │
+   5V ──►    VIN ──│ [■] VIN/5V          CLK [ ] │
                    └──────────────┬──────────────┘
                                   │
                                 [USB]
+
+  TM1637 CLK → GPIO25, DIO → GPIO26 (left side, rows 9 and 10)
+
+  SD0/SD1/SD2/SD3/CMD/CLK are wired to the on-board flash chip.
+  They are not usable as GPIOs; do not connect anything to them.
 
 ═══════════════════════════════════════════════════════════════════
 DHT22 / AM2302 CONNECTIONS
@@ -445,7 +490,7 @@ The official Espressif board package adds ESP32 support to Arduino IDE.
 
 ## Installing Required Libraries
 
-Install these four libraries via **Tools → Manage Libraries**:
+Install these five libraries via **Tools → Manage Libraries**:
 
 ### 1. DHT sensor library (Adafruit)
 
@@ -479,7 +524,17 @@ which this driver handles.
 3. When prompted to install dependencies, click **"Install All"** (this pulls
    in Adafruit BusIO).
 
-**Verify installed libraries** via **Sketch → Include Library → Manage Libraries** — all four should show a tick mark.
+### 5. TM1637
+
+Required for the 4-digit 7-segment display.
+
+1. Search for **`TM1637`**.
+2. Find **"TM1637" by Avishay Orpaz** — click **Install**.
+
+> Several libraries share this name. The sketch uses the one that provides
+> `TM1637Display.h` with `setSegments()`.
+
+**Verify installed libraries** via **Sketch → Include Library → Manage Libraries** — all five should show a tick mark.
 
 ---
 

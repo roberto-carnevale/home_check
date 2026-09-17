@@ -23,7 +23,7 @@ Deploy: `./deploy.sh` (requires `GOOGLE_CLOUD_PROJECT` and secrets as env vars)
 
 Two independent components share an HMAC secret:
 
-- **`esp32-sensor/`** — Arduino/PlatformIO C++ sketch. Reads sensors into circular buffers, computes rolling min/max/avg, POSTs HMAC-signed JSON to the server. Sensors: DHT22 (temp/humidity on GPIO4), LDR (light on GPIO34), AGS02MA (TVOC via I2C on SDA/SCL GPIO21/22, address 0x1A), SR505 PIR (motion on GPIO14). A **mode switch on GPIO19** (with internal pull-up) selects the target at boot: floating/HIGH → remote Cloud Run (HTTPS), tied to GND → local dev server (plain HTTP). Config files (`config.h`, `secrets.h`) are gitignored.
+- **`esp32-sensor/`** — Arduino/PlatformIO C++ sketch. Reads sensors into circular buffers, computes rolling min/max/avg, POSTs HMAC-signed JSON to the server. Sensors: DHT22 (temp/humidity on GPIO4), LDR (light on GPIO34), AGS02MA (TVOC via I2C on SDA/SCL GPIO21/22, address 0x1A), SR505 PIR (motion on GPIO14). A **TM1637 4-digit 7-segment display** (5V, CLK GPIO25, DIO GPIO26) driven by `DisplayManager` cycles temperature (`26°C`), humidity (`54rh`) and air quality (`100q`, or `lo q` above 999 ppb, `-- q` when unavailable) every 5 seconds. A **mode switch on GPIO19** (with internal pull-up) selects the target at boot: floating/HIGH → remote Cloud Run (HTTPS), tied to GND → local dev server (plain HTTP). Config files (`config.h`, `secrets.h`) are gitignored.
 
 - **`cloud-run-server/`** — Node.js 20 + Express. Entry point: `src/index.js`.
 
