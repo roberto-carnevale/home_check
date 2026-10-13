@@ -22,17 +22,17 @@ static const uint8_t SCREEN_COUNT = 3;
 DisplayManager::DisplayManager(uint8_t clkPin, uint8_t dioPin, uint8_t brightness)
     : _display(clkPin, dioPin), _brightness(brightness),
       _temperature(0.0f), _humidity(0.0f), _tvoc(-1.0f),
-      _tvocValid(false), _hasData(false),
+      _tvocValid(false), _hasData(false), _active(false),
       _screen(0), _lastRotateMs(0) {
 }
 
 void DisplayManager::begin() {
     _display.setBrightness(_brightness);
 
-    // Placeholder until the first sample lands, so a blank display is never
-    // mistaken for a dead module
-    const uint8_t waiting[] = { CHAR_MINUS, CHAR_MINUS, CHAR_MINUS, CHAR_MINUS };
-    _display.setSegments(waiting);
+    // Start with the display off: it only activates when PIR detects presence
+    // and the alarm is not armed.
+    const uint8_t blank[] = { CHAR_BLANK, CHAR_BLANK, CHAR_BLANK, CHAR_BLANK };
+    _display.setSegments(blank);
 }
 
 void DisplayManager::setReadings(float temperature, float humidity, float tvocPpb, bool tvocValid) {
@@ -41,19 +41,19 @@ void DisplayManager::setReadings(float temperature, float humidity, float tvocPp
     _tvoc = tvocPpb;
     _tvocValid = tvocValid;
 
-    // Redraw straight away rather than waiting for the next rotation tick, so
-    // a fresh sample is visible as soon as it is taken
     bool firstData = !_hasData;
     _hasData = true;
     if (firstData) {
         _screen = 0;
     }
-    renderCurrentScreen();
+    // Only redraw if the display is currently active
+    if (_active) {
+        renderCurrentScreen();
+    }
 }
 
 void DisplayManager::update(unsigned long nowMs) {
-    // Nothing to rotate through until the first sample arrives
-    if (!_hasData) {
+    if (!_hasData || !_active) {
         return;
     }
 
@@ -64,6 +64,19 @@ void DisplayManager::update(unsigned long nowMs) {
 
     _screen = (_screen + 1) % SCREEN_COUNT;
     renderCurrentScreen();
+}
+
+void DisplayManager::setActive(bool active) {
+    if (_active == active) return;
+    _active = active;
+
+    if (!_active) {
+        const uint8_t blank[] = { CHAR_BLANK, CHAR_BLANK, CHAR_BLANK, CHAR_BLANK };
+        _display.setSegments(blank);
+    } else if (_hasData) {
+        _screen = 0;
+        renderCurrentScreen();
+    }
 }
 
 void DisplayManager::renderCurrentScreen() {

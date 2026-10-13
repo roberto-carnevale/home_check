@@ -49,22 +49,9 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // This prevents the "No data received" alert from firing
         watchdog.resetWatchdog();
 
-        // Resolve PIR state FIRST: compare timestamps from the physical button
-        // and the dashboard. The most recent toggle wins.
-        let pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
-        if (typeof data.pir_enabled === 'boolean' && typeof data.pir_updated_at === 'number') {
-            const fsSeconds = pirCommand.updatedAt
-                ? (pirCommand.updatedAt.seconds || Math.floor(pirCommand.updatedAt._seconds || 0))
-                : 0;
-            if (data.pir_updated_at > fsSeconds) {
-                pirCommand = await firestore.setPirCommand(data.pir_enabled);
-            }
-        }
-
+        // Get current PIR state from Firestore for motion processing and broadcast
+        const pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
         const pirEnabled = pirCommand.enabled === true;
-        const pirUpdatedAt = pirCommand.updatedAt
-            ? (pirCommand.updatedAt.seconds || pirCommand.updatedAt._seconds || 0)
-            : 0;
 
         // Initialize an array to collect any triggered threshold alerts
         // We might have multiple alerts (e.g. cold AND dark)
@@ -90,14 +77,7 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // Process PIR motion
         if (data.motion_detected === true) {
             console.log(`PIR activated on device ${data.device_id} at ${new Date(data.timestamp * 1000).toISOString()}`);
-            
-            if (!pirEnabled && data.pir_enabled === true) {
-                // The hardware triggered and thought it was armed, but the dashboard
-                // recently disabled it. The hardware just hasn't polled the new state yet.
-                // Send the welcome email, but NO intrusion push notification.
-                mailer.sendAlert('Welcome Home', 'The PIR sensor see you entering, shuting down the alarm. Welcome home');
-            } else if (pirEnabled) {
-                // System is actually armed
+            if (pirEnabled) {
                 alerts.push('Motion Alert: Intrusion / Motion detected in monitored area!');
             }
         }
@@ -115,12 +95,12 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
             webpush.sendPushToAll('Home Check Alert', alertMessage);
         }
 
-        // Broadcast to SSE clients with the winning PIR state
+        // Broadcast to SSE clients with current Firestore PIR state
         if (typeof broadcastFn === 'function') {
             broadcastFn({ ...data, pir_enabled: pirEnabled });
         }
 
-        res.status(200).json({ success: true, pir_enabled: pirEnabled, pir_updated_at: pirUpdatedAt });
+        res.status(200).json({ success: true });
 
     } catch (error) {
         // Log the full error server-side; never expose internals to the client

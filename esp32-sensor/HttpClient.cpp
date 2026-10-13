@@ -110,7 +110,7 @@ String HttpClient::computeSignature(const String &timestamp, const String &bodyH
 
 // postJson implementation
 // Sends signed POST request over HTTPS or plain HTTP (when no CA cert)
-bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, bool *pirCommand, unsigned long *pirCommandTs)
+bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
 {
     const size_t bodyLength = jsonBody.length();
     if (bodyLength == 0)
@@ -198,25 +198,8 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, b
         Serial.println(http.errorToString(httpCode));
     }
 
-    bool success = false;
-    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED)
-    {
-        success = true;
-        if (pirCommand)
-        {
-            String response = http.getString();
-            StaticJsonDocument<128> doc;
-            if (deserializeJson(doc, response) == DeserializationError::Ok && doc["pir_enabled"].is<bool>())
-            {
-                *pirCommand = doc["pir_enabled"].as<bool>();
-                if (pirCommandTs && doc["pir_updated_at"].is<unsigned long>())
-                {
-                    *pirCommandTs = doc["pir_updated_at"].as<unsigned long>();
-                }
-            }
-        }
-    }
-    else if (httpCode >= 0)
+    bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED);
+    if (!success && httpCode >= 0)
     {
         String payload = http.getString();
         Serial.print("[HTTP] Error payload: ");
@@ -226,13 +209,7 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, b
     http.end();
     delete secureClient;
     delete plainClient;
-
-    if (success)
-    {
-        return true;
-    }
-
-    return false;
+    return success;
 }
 
 bool HttpClient::getPirCommand(bool &enabled, unsigned long &updatedAt, unsigned long timestampUnix, const char *commandPath)

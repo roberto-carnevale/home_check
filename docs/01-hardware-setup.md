@@ -274,6 +274,11 @@ cycling to the next one every 5 seconds. It is not an I2C device despite
 having two data lines, so it does not share the AGS02MA bus and needs no
 pull-up resistors.
 
+> **Presence-gated**: the display is blank by default. It only lights up when
+> the PIR sensor detects someone present **and** the alarm is disarmed
+> (`pirEnabled == false`). When the alarm is armed the display stays dark at
+> all times, regardless of motion.
+
 | TM1637 Pin | Wire Colour (suggested) | ESP32 Destination |
 |---|---|---|
 | VCC | Red | 5V (VIN) |
@@ -584,8 +589,8 @@ Open `config.h` and fill in:
 // ─── Timing ──────────────────────────────────────────────────
 #define SAMPLE_INTERVAL_MS         60000UL  // read sensors every 60 s
 #define PIR_SAMPLE_INTERVAL_MS     5000UL   // read PIR sensor every 5 s
-#define REPORT_INTERVAL_MIN        5        // POST to server every 5 min
-#define PIR_COMMAND_POLL_INTERVAL_MS 30000UL // poll dashboard PIR command every 30 s
+#define REPORT_INTERVAL_MIN        30       // POST to server every 30 min
+#define PIR_COMMAND_POLL_INTERVAL_MS 900000UL // poll dashboard PIR command every 15 min
 #define ROLLING_WINDOW             30       // 30-sample (30 min) window
 ```
 

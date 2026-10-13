@@ -26,6 +26,10 @@ public:
     // Call this on every loop() pass; it returns immediately when idle.
     void update(unsigned long nowMs);
 
+    // Enables or disables the display. When inactive the display is blanked
+    // and all rendering calls are suppressed until re-activated.
+    void setActive(bool active);
+
 private:
     TM1637Display _display;
     uint8_t _brightness;
@@ -36,6 +40,7 @@ private:
     float _tvoc;
     bool _tvocValid;
     bool _hasData;
+    bool _active;
 
     uint8_t _screen;              // 0 = temperature, 1 = humidity, 2 = air quality
     unsigned long _lastRotateMs;

@@ -667,7 +667,7 @@ gcloud monitoring uptime-checks create \
 
 ## Cost Estimate
 
-With typical home-monitoring usage (1 ESP32 posting every 5 minutes):
+With typical home-monitoring usage (1 ESP32 posting every 30 minutes):
 
 | Service | Usage | Monthly Cost |
 |---|---|---|

@@ -158,8 +158,6 @@ void sendReport(unsigned long ts) {
         // Add motion detection alarm status
         bool motionFlag = sensorMgr->isMotionDetected();
         doc["motion_detected"] = motionFlag;
-        doc["pir_enabled"] = pirEnabled;
-        doc["pir_updated_at"] = pirUpdatedAt;
         if (motionFlag) {
             Serial.printf("[PIR] Motion event reported for device %s at timestamp %lu\n", DEVICE_ID, ts);
         }
@@ -199,22 +197,9 @@ void sendReport(unsigned long ts) {
         Serial.print("[HTTP] Payload: ");
         Serial.println(jsonBody);
 
-        // POST JSON to server; the response carries the winning PIR state + timestamp
-        bool commandedPir = pirEnabled;
-        unsigned long commandedPirTs = 0;
-        if (httpClient->postJson(jsonBody, ts, &commandedPir, &commandedPirTs)) {
+        if (httpClient->postJson(jsonBody, ts)) {
             Serial.println("[HTTP] Report sent successfully.");
             sensorMgr->clearMotionFlag(); // Reset the sticky flag
-            // Adopt server state only if its timestamp is newer than ours
-            if (commandedPirTs > pirUpdatedAt && commandedPir != pirEnabled) {
-                pirEnabled = commandedPir;
-                pirUpdatedAt = commandedPirTs;
-                digitalWrite(PIR_LED_PIN, pirEnabled ? HIGH : LOW);
-                Serial.printf("[PIR] Server commanded PIR %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
-                if (!pirEnabled) {
-                    sensorMgr->clearMotionFlag();
-                }
-            }
         } else {
             Serial.println("[HTTP] Failed to send report.");
         }
@@ -350,6 +335,7 @@ void loop() {
             digitalWrite(PIR_LED_PIN, LOW);
         } else {
             digitalWrite(PIR_LED_PIN, HIGH);
+            displayMgr->setActive(false); // alarm armed: blank the display immediately
         }
     }
     lastToggleButtonState = toggleButtonState;
@@ -367,16 +353,25 @@ void loop() {
             Serial.printf("[PIR] Remote monitoring %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
             if (!pirEnabled) {
                 sensorMgr->clearMotionFlag();
+            } else {
+                displayMgr->setActive(false); // alarm armed: blank the display immediately
             }
         }
     }
 
-    // Check if it's time to poll the PIR sensor
-    if (pirEnabled && (currentMillis - lastPirSampleTime >= PIR_SAMPLE_INTERVAL_MS || lastPirSampleTime == 0)) {
+    // Sample PIR every cycle regardless of alarm state.
+    // Used both for the alarm trigger (when armed) and to drive the display.
+    if (currentMillis - lastPirSampleTime >= PIR_SAMPLE_INTERVAL_MS || lastPirSampleTime == 0) {
         lastPirSampleTime = currentMillis;
-        bool pirTrigger = sensorMgr->takePirSample();
+        bool pirPresence = sensorMgr->takePirSample();
 
-        if (pirTrigger && (lastPirReportTime == 0 || currentMillis - lastPirReportTime >= PIR_REPORT_COOLDOWN_MS)) {
+        // Display is on only when someone is present AND the alarm is NOT armed.
+        // When the alarm is armed, keep the display dark at all times.
+        displayMgr->setActive(!pirEnabled && pirPresence);
+
+        // Alarm trigger: only when the system is armed
+        if (pirEnabled && pirPresence &&
+            (lastPirReportTime == 0 || currentMillis - lastPirReportTime >= PIR_REPORT_COOLDOWN_MS)) {
             Serial.println("[PIR] Triggering immediate report due to active motion.");
             lastPirReportTime = currentMillis;
             unsigned long ts = getTimestamp();

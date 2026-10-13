@@ -48,7 +48,7 @@ const app = express();
 
 const publicDirectory = path.join(__dirname, 'public');
 const LOGIN_CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const getCookie = (req, name) => {
     const cookies = (req.headers.cookie || '').split(';');

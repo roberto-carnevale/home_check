@@ -146,7 +146,7 @@ The replay protection only checks `|now - timestamp| < 300s`. Within that 5-minu
 
 **Impact**: Alert manipulation within the replay window.
 
-**Fix**: Track recently seen `(timestamp, signature)` pairs in memory or Firestore and reject duplicates. Given the ESP32 posts every 5 minutes, the tracking set stays small.
+**Fix**: Track recently seen `(timestamp, signature)` pairs in memory or Firestore and reject duplicates. Given the ESP32 posts every 30 minutes, the tracking set stays small.
 
 ### M3 -- `SESSION_SECRET` Not in Deploy Script or Secret Manager -- REMEDIATED
 

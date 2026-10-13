@@ -49,13 +49,7 @@ const schema = Joi.object({
     }).optional(),
 
     // Optional motion detection flag from SR505 PIR sensor
-    motion_detected: Joi.boolean().optional(),
-
-    // Optional effective PIR monitoring state reported by the device
-    pir_enabled: Joi.boolean().optional(),
-
-    // Unix timestamp (seconds) of the last physical PIR button toggle
-    pir_updated_at: Joi.number().integer().optional()
+    motion_detected: Joi.boolean().optional()
 });
 
 // Export the validation middleware function
