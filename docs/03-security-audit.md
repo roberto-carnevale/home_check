@@ -100,7 +100,7 @@ While `.gitignore` prevents these from being committed, they exist as plaintext 
 
 **Was**: `GET /api/watchdog` and `POST /api/watchdog` were publicly accessible, allowing unauthenticated alert spam and data pruning.
 
-**Fix applied**: Added a `verifyWatchdogToken` middleware to `routes/watchdog.js`. The endpoint now requires an `Authorization: Bearer <token>` header checked against the `WATCHDOG_TOKEN` env var (constant-time comparison). Cloud Scheduler sends the token as a custom header. The token is stored in Secret Manager and loaded via `deploy.sh`.
+**Fix applied**: Added a `verifyWatchdogToken` middleware to `routes/watchdog.js`. The endpoint now supports two auth schemes: (1) **OIDC JWT** — Cloud Scheduler's native auth; the server verifies the token via `google-auth-library` and optionally restricts to a specific service account via `SCHEDULER_SA` env var (recommended); (2) **static bearer token** — `Authorization: Bearer <token>` checked against the `WATCHDOG_TOKEN` env var (constant-time comparison, kept as fallback for legacy setups). Both tokens are stored in Secret Manager.
 
 ### H4 -- No Rate Limiting on Login Code Request -- REMEDIATED
 

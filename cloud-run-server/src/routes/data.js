@@ -49,9 +49,26 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
         // This prevents the "No data received" alert from firing
         watchdog.resetWatchdog();
 
-        // Get current PIR state from Firestore for motion processing and broadcast
-        const pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
-        const pirEnabled = pirCommand.enabled === true;
+        // Reconcile PIR state between dashboard and ESP32.
+        // If the device reports its local pir_enabled, sync it with Firestore and
+        // get back the authoritative global state plus a flag indicating whether
+        // the device needs to be corrected. For older firmware that omits the field,
+        // fall back to a plain Firestore read.
+        let pirEnabled;
+        let needsPirSync = false;
+        let pirCommandTs = 0;
+        if (typeof data.pir_enabled === 'boolean') {
+            // pir_state_ts is pirUpdatedAt on the device — the Unix timestamp of
+            // the last button press or applied remote command, not the report time.
+            const sync = await firestore.syncEsp32PirState(data.pir_enabled, data.pir_state_ts || 0)
+                .catch(() => ({ globalEnabled: data.pir_enabled, needsSync: false, commandTs: 0 }));
+            pirEnabled = sync.globalEnabled;
+            needsPirSync = sync.needsSync;
+            pirCommandTs = sync.commandTs || 0;
+        } else {
+            const pirCommand = await firestore.getPirCommand().catch(() => ({ enabled: false }));
+            pirEnabled = pirCommand.enabled === true;
+        }
 
         // Initialize an array to collect any triggered threshold alerts
         // We might have multiple alerts (e.g. cold AND dark)
@@ -100,7 +117,16 @@ router.post('/', hmacMiddleware, validateMiddleware, async (req, res) => {
             broadcastFn({ ...data, pir_enabled: pirEnabled });
         }
 
-        res.status(200).json({ success: true });
+        // If the device's local state diverges from the global state, piggyback
+        // the correction on the response so it takes effect immediately instead
+        // of waiting for the next 15-minute PIR command poll.
+        // pir_command_ts is the server-side Unix timestamp of this decision so
+        // the device can store it as pirUpdatedAt and stay clock-aligned for
+        // future pir_state_ts comparisons.
+        const response = needsPirSync
+            ? { success: true, pir_command: pirEnabled, pir_command_ts: pirCommandTs }
+            : { success: true };
+        res.status(200).json(response);
 
     } catch (error) {
         // Log the full error server-side; never expose internals to the client

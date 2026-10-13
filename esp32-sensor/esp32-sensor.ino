@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <ArduinoOTA.h>
 #include "time.h"
 #include <ArduinoJson.h>
 
@@ -33,6 +34,7 @@ unsigned long lastPirSampleTime = 0;
 unsigned long lastPirReportTime = 0;
 unsigned long lastReportTime = 0;
 unsigned long lastPirCommandPollTime = 0;
+unsigned long lastPirPresenceMs = 0;  // millis() of last PIR HIGH reading (alarm-off display hold)
 const unsigned long PIR_REPORT_COOLDOWN_MS = 5UL * 60UL * 1000UL;
 
 // Track button state and last press time for manual test triggers with lockout
@@ -162,6 +164,13 @@ void sendReport(unsigned long ts) {
             Serial.printf("[PIR] Motion event reported for device %s at timestamp %lu\n", DEVICE_ID, ts);
         }
 
+        // Report current local alarm state AND the Unix timestamp of the last
+        // intentional state change (button press or applied remote command).
+        // The server compares pir_state_ts vs dashboard_updated_at to decide
+        // which source is authoritative — data-arrival time is never used.
+        doc["pir_enabled"]  = pirEnabled;
+        doc["pir_state_ts"] = pirUpdatedAt;
+
         // Add temperature statistics object
         JsonObject tempObj = doc.createNestedObject("temperature");
         tempObj["min"] = stats.temp.min;
@@ -197,15 +206,72 @@ void sendReport(unsigned long ts) {
         Serial.print("[HTTP] Payload: ");
         Serial.println(jsonBody);
 
-        if (httpClient->postJson(jsonBody, ts)) {
+        String responseBody;
+        if (httpClient->postJson(jsonBody, ts, responseBody)) {
             Serial.println("[HTTP] Report sent successfully.");
             sensorMgr->clearMotionFlag(); // Reset the sticky flag
+
+            // If the server detected a state divergence it piggybacks a
+            // pir_command on the response — apply it immediately so we don't
+            // have to wait for the next 15-minute poll.
+            StaticJsonDocument<64> respDoc;
+            if (deserializeJson(respDoc, responseBody) == DeserializationError::Ok &&
+                respDoc["pir_command"].is<bool>()) {
+                bool newPirState = respDoc["pir_command"].as<bool>();
+                if (newPirState != pirEnabled) {
+                    pirEnabled = newPirState;
+                    // Use the server-provided command timestamp so our next
+                    // pir_state_ts is server-clock-aligned and won't lose a
+                    // future comparison against dashboard_updated_at.
+                    pirUpdatedAt = respDoc["pir_command_ts"].is<unsigned long>()
+                        ? respDoc["pir_command_ts"].as<unsigned long>()
+                        : ts;
+                    digitalWrite(PIR_LED_PIN, pirEnabled ? HIGH : LOW);
+                    if (!pirEnabled) {
+                        sensorMgr->clearMotionFlag();
+                    } else {
+                        lastPirPresenceMs = 0;
+                        displayMgr->setActive(false);
+                    }
+                    Serial.printf("[PIR] State synced via data response: %s\n",
+                                  pirEnabled ? "enabled" : "disabled");
+                }
+            }
         } else {
             Serial.println("[HTTP] Failed to send report.");
         }
     } else {
         Serial.println("[HTTP] Not enough data to report.");
     }
+}
+
+// Configures OTA callbacks (called once) and starts the OTA server.
+// Safe to call again after a WiFi reconnect — ArduinoOTA re-binds cleanly.
+void startOTA() {
+    ArduinoOTA.setHostname(OTA_HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+
+    ArduinoOTA.onStart([]() {
+        String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+        Serial.println("[OTA] Starting update: " + type);
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("[OTA] Update complete — rebooting");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("[OTA] Progress: %u%%\r", progress / (total / 100));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("[OTA] Error[%u]: ", error);
+        if      (error == OTA_AUTH_ERROR)    Serial.println("Auth failed");
+        else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive failed");
+        else if (error == OTA_END_ERROR)     Serial.println("End failed");
+    });
+
+    ArduinoOTA.begin();
+    Serial.printf("[OTA] Ready — hostname: %s\n", OTA_HOSTNAME);
 }
 
 // Standard Arduino setup function
@@ -249,6 +315,8 @@ void setup() {
     if (connectWiFi()) {
         // Synchronize time for HMAC signatures
         timeSynced = syncTime();
+        // Start OTA server so firmware can be pushed from Arduino IDE over WiFi
+        startOTA();
     } else {
         Serial.println("[WIFI] Continuing offline; will retry in the main loop.");
     }
@@ -279,6 +347,12 @@ void loop() {
     // Fetch current millis for scheduling
     unsigned long currentMillis = millis();
 
+    // Service pending OTA requests. Must run on every loop pass while connected
+    // so the IDE can push a new firmware image at any time.
+    if (WiFi.status() == WL_CONNECTED) {
+        ArduinoOTA.handle();
+    }
+
     // Reconnect to WiFi if the link is down, but no more often than
     // WIFI_RETRY_INTERVAL_MS: each attempt costs a blocking timeout, and
     // retrying every pass would starve sampling and the button handling.
@@ -290,6 +364,8 @@ void loop() {
             // The clock is lost across a long outage, so resync before the
             // next report rather than signing it with a stale timestamp.
             timeSynced = syncTime();
+            // Re-register the OTA server after reconnecting
+            startOTA();
         }
     }
 
@@ -335,13 +411,16 @@ void loop() {
             digitalWrite(PIR_LED_PIN, LOW);
         } else {
             digitalWrite(PIR_LED_PIN, HIGH);
+            lastPirPresenceMs = 0;        // clear hold timer so display stays dark
             displayMgr->setActive(false); // alarm armed: blank the display immediately
         }
     }
     lastToggleButtonState = toggleButtonState;
 
     // Poll the dashboard command so PIR can also be controlled remotely.
-    if (currentMillis - lastPirCommandPollTime >= PIR_COMMAND_POLL_INTERVAL_MS || lastPirCommandPollTime == 0) {
+    // Guard with timeSynced: without a valid NTP clock the HMAC timestamp
+    // would be near epoch-0 and the server would reject it with 401.
+    if (timeSynced && (currentMillis - lastPirCommandPollTime >= PIR_COMMAND_POLL_INTERVAL_MS || lastPirCommandPollTime == 0)) {
         lastPirCommandPollTime = currentMillis;
         bool requestedPirState = pirEnabled;
         unsigned long requestedPirTs = 0;
@@ -354,6 +433,7 @@ void loop() {
             if (!pirEnabled) {
                 sensorMgr->clearMotionFlag();
             } else {
+                lastPirPresenceMs = 0;        // clear hold timer so display stays dark
                 displayMgr->setActive(false); // alarm armed: blank the display immediately
             }
         }
@@ -365,9 +445,19 @@ void loop() {
         lastPirSampleTime = currentMillis;
         bool pirPresence = sensorMgr->takePirSample();
 
-        // Display is on only when someone is present AND the alarm is NOT armed.
-        // When the alarm is armed, keep the display dark at all times.
-        displayMgr->setActive(!pirEnabled && pirPresence);
+        // When alarm is off and PIR fires, refresh the presence timestamp so
+        // the display hold timer starts (or extends) from this moment.
+        if (!pirEnabled && pirPresence) {
+            lastPirPresenceMs = currentMillis;
+        }
+
+        // Keep the display on for DISPLAY_PRESENCE_DURATION_MS after the last
+        // detected motion. This prevents flicker when the PIR briefly goes LOW
+        // between detections. When the alarm is armed the display stays dark.
+        bool displayActive = !pirEnabled &&
+                             lastPirPresenceMs > 0 &&
+                             (currentMillis - lastPirPresenceMs < DISPLAY_PRESENCE_DURATION_MS);
+        displayMgr->setActive(displayActive);
 
         // Alarm trigger: only when the system is armed
         if (pirEnabled && pirPresence &&

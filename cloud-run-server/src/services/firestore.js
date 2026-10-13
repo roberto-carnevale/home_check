@@ -29,11 +29,64 @@ module.exports = {
         return doc.exists ? doc.data() : { enabled: false };
     },
 
-    // Persist the desired PIR state so it is available to every Cloud Run instance.
+    // Persist the desired PIR state from the dashboard.
+    // Records dashboard_enabled/dashboard_updated_at and recomputes the global state.
+    // Dashboard always wins because the user just clicked — it is the most recent source.
     async setPirCommand(enabled) {
-        const command = { enabled, updatedAt: Firestore.Timestamp.now() };
-        await db.collection('device_commands').doc('pir').set(command);
+        const now = Firestore.Timestamp.now();
+        const command = {
+            enabled,
+            updated_at: now,
+            dashboard_enabled: enabled,
+            dashboard_updated_at: now,
+        };
+        await db.collection('device_commands').doc('pir').set(command, { merge: true });
         return command;
+    },
+
+    // Called when the ESP32 reports its local PIR state via POST /api/data.
+    // Sequence:
+    //   1. Read dashboard state from Firestore.
+    //   2. Compare esp32StateTsSecs (pirUpdatedAt — when the button was pressed
+    //      or the last remote command was applied on the device) against
+    //      dashboard_updated_at (when the dashboard toggle was last clicked).
+    //      Both are Unix seconds; both originate from server-aligned clocks
+    //      (NTP on ESP32, Firestore server time on dashboard).
+    //   3. Latest timestamp wins; dashboard wins on a tie or when esp32StateTsSecs
+    //      is 0 (device just booted and has never intentionally changed state).
+    //   4. Persist esp32 fields and the resolved global state.
+    //   5. Return { globalEnabled, needsSync, commandTs } so the route can
+    //      piggyback a correction + its server-side timestamp on the response,
+    //      letting the device align its clock reference for future comparisons.
+    async syncEsp32PirState(esp32Enabled, esp32StateTsSecs) {
+        const ref = db.collection('device_commands').doc('pir');
+        const snap = await ref.get();
+        const stored = snap.exists ? snap.data() : {};
+
+        const dashboardTs = stored.dashboard_updated_at
+            ? (stored.dashboard_updated_at.seconds ?? stored.dashboard_updated_at._seconds ?? 0)
+            : 0;
+
+        // esp32StateTsSecs is pirUpdatedAt: the Unix timestamp of the last
+        // intentional state change on the device (button press or applied sync).
+        // 0 means the device just booted and has never changed state → dashboard wins.
+        const esp32Ts = esp32StateTsSecs || 0;
+
+        // Latest intentional-change timestamp wins; dashboard wins on tie or boot.
+        const globalEnabled = esp32Ts > dashboardTs
+            ? esp32Enabled
+            : (stored.dashboard_enabled !== undefined ? stored.dashboard_enabled : esp32Enabled);
+
+        const now = Firestore.Timestamp.now();
+        await ref.set({
+            esp32_enabled: esp32Enabled,
+            esp32_updated_at: Firestore.Timestamp.fromMillis(esp32Ts * 1000),
+            enabled: globalEnabled,
+            updated_at: now,
+        }, { merge: true });
+
+        const commandTs = now.seconds ?? now._seconds ?? Math.floor(Date.now() / 1000);
+        return { globalEnabled, needsSync: esp32Enabled !== globalEnabled, commandTs };
     },
 
     // Function to save a new sensor reading

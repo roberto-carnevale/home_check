@@ -46,6 +46,11 @@ for (const key of REQUIRED_SECRETS) {
 // This creates our main server object
 const app = express();
 
+// Cloud Run sits behind Google's load balancer which sets X-Forwarded-For.
+// Without this, express-rate-limit cannot identify real client IPs and throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR. '1' means trust the first proxy hop.
+app.set('trust proxy', 1);
+
 const publicDirectory = path.join(__dirname, 'public');
 const LOGIN_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -309,6 +314,13 @@ process.on('SIGTERM', () => {
     console.log('SIGTERM signal received: closing HTTP server');
     // Stop the watchdog to prevent orphaned timers
     watchdog.stopWatchdog();
+    // Explicitly end all open SSE streams before closing the server.
+    // Without this, server.close() leaves them dangling until Cloud Run
+    // kills the process hard, producing "Truncated response body" warnings.
+    for (const client of sseClients) {
+        client.end();
+    }
+    sseClients.clear();
     // Close the server and end all active connections
     server.close(() => {
         console.log('HTTP server closed');

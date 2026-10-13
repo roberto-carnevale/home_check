@@ -49,7 +49,16 @@ const schema = Joi.object({
     }).optional(),
 
     // Optional motion detection flag from SR505 PIR sensor
-    motion_detected: Joi.boolean().optional()
+    motion_detected: Joi.boolean().optional(),
+
+    // ESP32 local alarm (PIR) state at the time of the report.
+    // Used by the server to reconcile dashboard vs device state.
+    pir_enabled: Joi.boolean().optional(),
+
+    // Unix timestamp of the last intentional PIR state change on the device
+    // (button press or applied remote command). Compared against
+    // dashboard_updated_at to determine which source is authoritative.
+    pir_state_ts: Joi.number().integer().min(0).optional()
 });
 
 // Export the validation middleware function

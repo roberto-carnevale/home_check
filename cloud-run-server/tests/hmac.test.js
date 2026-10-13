@@ -8,11 +8,15 @@ const crypto = require('crypto');
 // This allows us to test it in isolation
 const hmacMiddleware = require('../src/middleware/hmac');
 
-// Create a mock Express app for testing purposes
-// We only mount the middleware and a simple success route
+// Create a mock Express app for testing purposes.
+// The verify callback mirrors production: it captures the raw body bytes so
+// the HMAC middleware can hash exactly what the ESP32 signed.
 const app = express();
-app.use(express.json());
+app.use(express.json({
+    verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.post('/test', hmacMiddleware, (req, res) => res.status(200).send('OK'));
+app.get('/test', hmacMiddleware, (req, res) => res.status(200).send('OK'));
 
 // Define the test suite for the HMAC middleware
 // This groups all related tests together
@@ -69,6 +73,23 @@ describe('HMAC Middleware', () => {
 
         // Expect a 401 Unauthorized status
         expect(res.status).toBe(401);
+    });
+
+    // Test case: GET with no body (e.g. /api/pir/command) must pass.
+    // body-parser sets req.body = {} for all requests before checking whether
+    // a body exists, so the middleware must NOT use req.body as the hash input.
+    it('should pass GET request signed with empty body hash', async () => {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const bodyHash = crypto.createHash('sha256').update('').digest('hex');
+        const stringToSign = `${timestamp}.${bodyHash}`;
+        const signature = crypto.createHmac('sha256', 'test_secret').update(stringToSign).digest('hex');
+
+        const res = await request(app)
+            .get('/test')
+            .set('x-timestamp', timestamp.toString())
+            .set('x-signature', signature);
+
+        expect(res.status).toBe(200);
     });
 
     // Test case: Expired timestamp should fail (Replay attack protection)

@@ -372,7 +372,7 @@ VAPID_PRIVATE_KEY=home-check-vapid-private:latest,\
 VAPID_SUBJECT=home-check-vapid-subject:latest,\
 ALLOWED_ORIGIN=home-check-allowed-origin:latest" \
   --project=$PROJECT_ID
-```i
+```
 
 At the end of deployment you will see:
 
@@ -539,17 +539,35 @@ Because Cloud Run can scale to zero when the service is idle, the in-process tim
 
 Use Cloud Scheduler or another periodic job to poll the endpoint every 10 minutes. If no new sensor reading arrives within 95 minutes, the endpoint triggers the watchdog alert and stores its alert state in Firestore.
 
-Example scheduler job (the `Authorization` header carries the `WATCHDOG_TOKEN` secret):
+**Recommended** — use Cloud Scheduler's native OIDC auth (no shared secret needed):
 
 ```bash
-# Read the token from Secret Manager (or paste it directly)
+# Create (or use an existing) service account for the scheduler
+SA="home-check-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts create home-check-scheduler \
+  --display-name="Home Check Cloud Scheduler"
+
+gcloud scheduler jobs create http home-check-watchdog-check \
+  --schedule="*/10 * * * *" \
+  --uri="https://<YOUR_SERVICE_URL>/api/watchdog" \
+  --http-method=POST \
+  --oidc-service-account-email="${SA}" \
+  --oidc-token-audience="https://<YOUR_SERVICE_URL>" \
+  --time-zone="UTC"
+```
+
+The server verifies the OIDC JWT automatically. To restrict to this specific service account set `SCHEDULER_SA=<SA_EMAIL>` in the Cloud Run service environment.
+
+**Alternative** — static bearer token (legacy, still supported):
+
+```bash
 WATCHDOG_TOKEN=$(gcloud secrets versions access latest \
   --secret=home-check-watchdog-token --project=$PROJECT_ID)
 
 gcloud scheduler jobs create http home-check-watchdog-check \
   --schedule="*/10 * * * *" \
   --uri="https://<YOUR_SERVICE_URL>/api/watchdog" \
-  --http-method=GET \
+  --http-method=POST \
   --headers="Authorization=Bearer ${WATCHDOG_TOKEN}" \
   --time-zone="UTC"
 ```
@@ -732,7 +750,7 @@ It should show `roles/datastore.user`.
 
 ### Rate limit hit (429 Too Many Requests)
 
-The server limits `/api/data` to **60 requests per 15 minutes per IP**. With a 5-minute posting interval this gives a comfortable 3 requests per 15 minutes — well within the limit. If you reduced `REPORT_INTERVAL_MIN` significantly, raise the `max` value in `index.js`.
+The server limits `/api/data` to **60 requests per 15 minutes per IP**. With a 30-minute posting interval this gives a comfortable 1 request per 15 minutes — well within the limit. If you reduced `REPORT_INTERVAL_MIN` significantly, raise the `max` value in `index.js`.
 
 ---
 

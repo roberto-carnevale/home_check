@@ -587,11 +587,11 @@ Open `config.h` and fill in:
 #define AGS02MA_ADDR   0x1A // AGS02MA default I2C address
 
 // ─── Timing ──────────────────────────────────────────────────
-#define SAMPLE_INTERVAL_MS         60000UL  // read sensors every 60 s
-#define PIR_SAMPLE_INTERVAL_MS     5000UL   // read PIR sensor every 5 s
+#define SAMPLE_INTERVAL_MS         120000UL // read sensors every 2 min
+#define PIR_SAMPLE_INTERVAL_MS     500UL    // read PIR sensor every 500 ms
 #define REPORT_INTERVAL_MIN        30       // POST to server every 30 min
 #define PIR_COMMAND_POLL_INTERVAL_MS 900000UL // poll dashboard PIR command every 15 min
-#define ROLLING_WINDOW             30       // 30-sample (30 min) window
+#define ROLLING_WINDOW             60       // 60-sample (30 min) window
 ```
 
 ### Step 2 — Create `secrets.h`
@@ -653,6 +653,46 @@ MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
 
 ---
 
+## OTA (Over-The-Air) Firmware Updates
+
+After the first USB flash the ESP32 registers an ArduinoOTA server on the local WiFi network. Subsequent firmware updates can be pushed wirelessly from the Arduino IDE — no USB cable needed.
+
+### Set the OTA password
+
+Open `config.h` and change the placeholder:
+
+```cpp
+// ─── OTA Updates ─────────────────────────────────────────────
+#define OTA_HOSTNAME  "home-check-esp32"   // appears in Arduino IDE port list
+#define OTA_PASSWORD  "change-me"          // choose a strong password
+```
+
+> Keep `OTA_PASSWORD` out of version control — `config.h` is gitignored.
+
+### Push a firmware update
+
+1. Make sure your computer is on the **same WiFi network** as the ESP32.
+2. Open **Tools → Port** in Arduino IDE — you should see a network port appear:
+   ```
+   home-check-esp32 at 192.168.1.xx (esp32)
+   ```
+3. Select that network port.
+4. Click **Upload** as usual — Arduino IDE will prompt for the OTA password.
+5. The Serial Monitor will show progress:
+   ```
+   [OTA] Starting update: sketch
+   [OTA] Progress: 100%
+   [OTA] Update complete — rebooting
+   ```
+
+### Notes
+
+- OTA is only reachable on the **local network** (UDP port 3232) — it is not exposed to the internet.
+- If the network port does not appear, confirm the ESP32 is connected to WiFi (check the Serial Monitor) and that mDNS/Bonjour is not blocked by a local firewall.
+- The first flash after a fresh board **must** be done via USB; OTA requires the sketch to already be running on the device.
+
+---
+
 ## Reading the Serial Monitor
 
 Open **Tools → Serial Monitor** (or press `Ctrl+Shift+M`). Set baud rate to **115200**.
@@ -667,6 +707,7 @@ You should see output like:
 [WIFI] IP address: 192.168.1.42
 [WIFI] Syncing time via NTP...
 [WIFI] Time synchronized successfully.
+[OTA] Ready — hostname: home-check-esp32
 [MODE] REMOTE server selected (GPIO19 HIGH)
 [TVOC] AGS02MA initialised at 0x1A, firmware 0x18086001
 [SENSOR] Taking environmental sample...
@@ -690,6 +731,7 @@ You should see output like:
 | `[TVOC]` | AGS02MA init result, firmware version, I2C bus scan and read failures |
 | `[PIR]` | PIR monitoring toggle, motion events, remote command polling |
 | `[HTTP]` | HTTP/HTTPS POST, response code, PIR command polling |
+| `[OTA]` | OTA server ready, update progress, errors |
 
 ### Common Serial Monitor Errors
 

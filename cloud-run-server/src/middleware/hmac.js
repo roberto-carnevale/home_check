@@ -44,11 +44,12 @@ module.exports = function verifyHMAC(req, res, next) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Use the raw body bytes the client actually sent (preserved by the verify
-    // callback in express.json). This avoids re-serialization differences such as
-    // float formatting (e.g. 25.50 → 25.5) that would break the hash.
-    // Falls back to JSON.stringify for tests or if rawBody is unavailable.
-    const bodyString = req.rawBody || (req.body === undefined ? '' : JSON.stringify(req.body));
+    // Use the raw body bytes preserved by express.json's verify callback.
+    // IMPORTANT: do not fall back to req.body — body-parser initialises it to {}
+    // for every request (even GET with no body) before it checks whether a body
+    // exists, so JSON.stringify(req.body) would produce '{}' instead of ''
+    // and break the hash for bodyless requests like GET /api/pir/command.
+    const bodyString = req.rawBody !== undefined ? req.rawBody : '';
 
     // Compute the SHA256 hash of the body
     // This ensures the body hasn't been tampered with

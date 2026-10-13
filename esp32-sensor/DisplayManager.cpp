@@ -75,6 +75,7 @@ void DisplayManager::setActive(bool active) {
         _display.setSegments(blank);
     } else if (_hasData) {
         _screen = 0;
+        _lastRotateMs = millis(); // reset rotation timer so temperature stays for the full interval
         renderCurrentScreen();
     }
 }

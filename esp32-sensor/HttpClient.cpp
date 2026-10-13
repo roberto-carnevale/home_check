@@ -110,7 +110,7 @@ String HttpClient::computeSignature(const String &timestamp, const String &bodyH
 
 // postJson implementation
 // Sends signed POST request over HTTPS or plain HTTP (when no CA cert)
-bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
+bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, String &responseBody)
 {
     const size_t bodyLength = jsonBody.length();
     if (bodyLength == 0)
@@ -199,7 +199,11 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix)
     }
 
     bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED);
-    if (!success && httpCode >= 0)
+    if (success)
+    {
+        responseBody = http.getString();
+    }
+    else if (httpCode >= 0)
     {
         String payload = http.getString();
         Serial.print("[HTTP] Error payload: ");

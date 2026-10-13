@@ -66,22 +66,24 @@
 // Mode switch pin: HIGH/floating = remote server, GND = local server
 #define MODE_SWITCH_PIN  19
 
-// ─── TVOC sensor (AGS02MA via I2C) ─────────────────────────
-#define TVOC_SDA_PIN   21   // I2C SDA (default ESP32 pin)
-#define TVOC_SCL_PIN   22   // I2C SCL (default ESP32 pin)
-#define AGS02MA_ADDR   0x1A // AGS02MA default I2C address
-
 // Timing and Interval Definitions
 // 2 minutes between environmental sensor samples (in milliseconds)
 #define SAMPLE_INTERVAL_MS   120000UL
-// Poll PIR sensor every 5 seconds
-#define PIR_SAMPLE_INTERVAL_MS 5000UL
-// POST data to the server every 5 minutes
-#define REPORT_INTERVAL_MIN  5
-// Poll dashboard PIR command every 30 seconds
-#define PIR_COMMAND_POLL_INTERVAL_MS 30000UL
-// Calculate rolling statistics over the last 30 minutes
-#define ROLLING_WINDOW       30
+// Poll PIR sensor every 500 ms (fast enough to catch brief detections)
+#define PIR_SAMPLE_INTERVAL_MS 500UL
+// POST data to the server every 30 minutes
+#define REPORT_INTERVAL_MIN  30
+// Poll dashboard PIR command every 15 minutes
+#define PIR_COMMAND_POLL_INTERVAL_MS 900000UL
+// Calculate rolling statistics over the last 30 minutes (60 × 30 s samples)
+#define ROLLING_WINDOW       60
+
+// 7-segment display presence hold: keep display on for this long after last
+// PIR motion (alarm disarmed only). 2 full rotation cycles = 30 s.
+#define DISPLAY_PRESENCE_DURATION_MS  30000UL
+
+// OTA firmware update (ArduinoOTA over local WiFi — see secrets.h for password)
+#define OTA_HOSTNAME  "home-check-esp32"
 
 // Include sensitive configuration at the bottom
 // This keeps secrets separate from general config
