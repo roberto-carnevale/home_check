@@ -1,7 +1,7 @@
 # Security Audit
 
 > Full security review of the Home Check IoT system (ESP32 + Cloud Run + PWA dashboard).
-> Last updated: 2026-07-22.
+> Last updated: 2026-10-16.
 
 ---
 
@@ -44,9 +44,11 @@ ESP32 (home LAN) ──HTTPS──> Cloud Run (public internet) <──HTTPS─�
 
 **Fix applied**: Replaced the manual CA certificate approach with the **ESP32 built-in root CA certificate bundle** (`esp_crt_bundle.h`). This bundle ships with the ESP32 Arduino core and contains ~130 Mozilla trusted root CAs, working exactly like a browser. Benefits:
 - Proper TLS verification without `setInsecure()`
-- No need to manually extract or rotate the `ROOT_CA_CERT` in `secrets.h`
+- No need to manually extract or rotate any `ROOT_CA_CERT`
 - Survives Google certificate rotations automatically
 - `setCACert()` is still supported as an override for certificate pinning scenarios
+
+The `ROOT_CA_CERT` constant that previously appeared in `config.h` was subsequently identified as dead code (both server mode branches passed `caCert = nullptr`) and removed entirely.
 
 ### C2 -- Secrets Present in Untracked Local Files Without Encryption
 
@@ -260,9 +262,9 @@ If WiFi is unavailable, the ESP32 blocks indefinitely. No watchdog reset, no sen
 
 This file appears to be a developer scratch pad with copy-pasted test commands, VAPID keys, the HMAC secret, SMTP app password, and the server URL. While currently gitignored at the root level, it resides in the `docs/` directory which developers typically do commit. Consider deleting this file entirely and storing secrets in a password manager.
 
-### I2 -- `config.h` Has Secrets Inline Instead of in `secrets.h`
+### I2 -- `config.h` Has HMAC Secret Inline Instead of in `secrets.h`
 
-The actual `config.h` includes the HMAC secret and root CA certificate directly instead of in `secrets.h` as the project convention dictates. There's a `////MOVE TO SECRECTS` comment acknowledging this TODO.
+The actual `config.h` includes the HMAC secret and OTA password directly instead of in `secrets.h` as the project convention dictates. There's a `////MOVE TO SECRECTS` comment acknowledging this TODO. The `ROOT_CA_CERT` that was also inline in `config.h` has been removed (it was dead code — the firmware uses the built-in CA bundle).
 
 ### I3 -- `PIR_SAMPLE_INTERVAL_MS` and PIR Pins Missing from `config.h.example` -- REMEDIATED
 
@@ -270,15 +272,13 @@ The actual `config.h` includes the HMAC secret and root CA certificate directly 
 
 **Fix applied**: `config.h.example` now includes all three defines.
 
-### I4 -- ESP32 Local Mode Connection Aborted
+### I4 -- ESP32 Local Mode Requires HTTPS on the Local Server
 
-**File**: `esp32-sensor/HttpClient.cpp:159`
+**File**: `esp32-sensor/HttpClient.cpp`
 
-```cpp
-Serial.println("[HTTP] No root CA provided, connection aborted for security reasons");
-```
+The firmware always constructs an `https://` URL regardless of mode switch position. When the mode switch selects the local dev server (`SERVER_HOST_LOCAL` / `SERVER_PORT_LOCAL`), the TLS handshake is attempted against that host. A typical local development server (e.g. `npm start` on `192.168.x.x:8080`) does not serve TLS, so the connection fails at the handshake stage.
 
-When the mode switch selects local server (`caCert = nullptr`), the `postJson` method aborts because there's no CA cert and the plain HTTP path was removed. Local development mode is effectively broken.
+**Workaround for local development**: run the local server behind a reverse proxy with a self-signed certificate and trust that cert on the ESP32 via `setCACert()`, or use a tunnelling service (e.g. `ngrok`) that provides a valid HTTPS endpoint.
 
 ---
 
@@ -286,8 +286,8 @@ When the mode switch selects local server (`caCert = nullptr`), the `postJson` m
 
 | ID | Severity | Effort | Description |
 |---|---|---|---|
-| **C1** | Critical | DONE | Remove `setInsecure()`, use built-in CA bundle |
-| **C2** | Critical | 15 min | Delete `docs/vapid.txt`, move secrets from `config.h` to `secrets.h` |
+| **C1** | Critical | DONE | Remove `setInsecure()`, use built-in CA bundle; dead `ROOT_CA_CERT` removed |
+| **C2** | Critical | 15 min | Delete `docs/vapid.txt`, move HMAC secret from `config.h` to `secrets.h` |
 | **C3** | Critical | DONE | Fail hard if `HMAC_SECRET_KEY` is not set |
 | **H1** | High | DONE | Require `SESSION_SECRET` env var, fail if missing |
 | **H2** | High | DONE | Fix `ALLOWED_ORIGIN` in `deploy.sh` |
@@ -297,10 +297,11 @@ When the mode switch selects local server (`caCert = nullptr`), the `postJson` m
 | **M1** | Medium | 20 min | Use per-session login challenge documents |
 | **M2** | Medium | 20 min | Track seen signatures to block in-window replays |
 | **M3** | Medium | DONE | Add `SESSION_SECRET` to `deploy.sh` secrets |
-| **M4** | Medium | Low | Accept or include path in HMAC for GET requests |
+| **M4** | Medium | Low | Include URL path in HMAC for GET requests |
 | **M5** | Medium | 10 min | Deploy restrictive Firestore security rules |
 | **L1** | Low | 5 min | Add `helmet` middleware |
 | **L2** | Low | 5 min | Add SRI hash to Chart.js script tag |
 | **L3** | Low | 2 min | Verify `NODE_ENV=production` on deployed service |
 | **L4** | Low | 5 min | Add device_id pattern validation |
 | **L5** | Low | 10 min | Add WiFi reconnect timeout on ESP32 |
+| **I4** | Info | Medium | Local dev mode requires HTTPS on the local server; use a proxy or tunnel |

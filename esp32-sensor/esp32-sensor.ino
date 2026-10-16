@@ -356,6 +356,45 @@ void loop() {
         Log.handle();
     }
 
+    // Handle commands from Serial or Telnet:
+    //   send    → force an immediate data report (like the physical button)
+    //   read    → print the latest sensor readings
+    //   arm     → enable PIR alarm (like the physical toggle button)
+    //   disarm  → disable PIR alarm
+    {
+        String cmd = Log.readCommand();
+        if (cmd == "send") {
+            Log.println("[CMD] 'send' received — triggering report...");
+            sensorMgr->takeSample();
+            unsigned long ts = getTimestamp();
+            sendReport(ts);
+            lastReportTime = currentMillis;
+        } else if (cmd == "read") {
+            LastReading r = sensorMgr->getLastReading();
+            if (r.valid) {
+                Log.printf("[CMD] Temp: %.1f°C  Humidity: %.1f%%  Light: %.0f",
+                           r.temp, r.humidity, r.light);
+                if (r.tvoc >= 0) {
+                    Log.printf("  TVOC: %.0f ppb", r.tvoc);
+                }
+                Log.printf("  PIR: %s\n", pirEnabled ? "armed" : "disarmed");
+            } else {
+                Log.println("[CMD] No sensor data yet.");
+            }
+        } else if (cmd == "arm") {
+            if (!pirEnabled) {
+                pirEnabled = true;
+                pirUpdatedAt = getTimestamp();
+                digitalWrite(PIR_LED_PIN, HIGH);
+                lastPirPresenceMs = 0;
+                displayMgr->setActive(false);
+                Log.printf("[CMD] Alarm armed (ts %lu)\n", pirUpdatedAt);
+            } else {
+                Log.println("[CMD] Alarm already armed.");
+            }
+        }
+    }
+
     // Reconnect to WiFi if the link is down, but no more often than
     // WIFI_RETRY_INTERVAL_MS: each attempt costs a blocking timeout, and
     // retrying every pass would starve sampling and the button handling.

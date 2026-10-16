@@ -66,6 +66,40 @@ size_t TelnetLogger::write(const uint8_t *buf, size_t size) {
     return size;
 }
 
+String TelnetLogger::readCommand() {
+    // Drain Serial into its buffer
+    while (Serial.available()) {
+        char c = (char)Serial.read();
+        if (c == '\n') {
+            String cmd = _serialBuf;
+            _serialBuf = "";
+            cmd.trim();
+            cmd.toLowerCase();
+            if (cmd.length() > 0) return cmd;
+        } else if (c != '\r') {
+            _serialBuf += c;
+        }
+    }
+
+    // Drain Telnet client into its buffer
+    if (_client && _client.connected()) {
+        while (_client.available()) {
+            char c = (char)_client.read();
+            if (c == '\n') {
+                String cmd = _telnetBuf;
+                _telnetBuf = "";
+                cmd.trim();
+                cmd.toLowerCase();
+                if (cmd.length() > 0) return cmd;
+            } else if (c != '\r') {
+                _telnetBuf += c;
+            }
+        }
+    }
+
+    return "";
+}
+
 int TelnetLogger::printf(const char *format, ...) {
     // 512 bytes covers the largest log line (JSON payload)
     char buf[512];

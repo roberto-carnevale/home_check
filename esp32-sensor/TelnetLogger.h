@@ -26,6 +26,10 @@ public:
     // Accept new clients and drop disconnected ones — call every loop()
     void handle();
 
+    // Read one complete line from Serial or Telnet (non-blocking).
+    // Returns the trimmed, lower-case command string, or "" if no line is ready yet.
+    String readCommand();
+
     // printf-style formatting (Print base class does not provide this)
     int printf(const char *format, ...) __attribute__((format(printf, 2, 3)));
 
@@ -38,6 +42,10 @@ private:
     WiFiServer _server;
     WiFiClient _client;
     bool       _serverStarted;
+
+    // Line-accumulation buffers for non-blocking command reading
+    String _serialBuf;
+    String _telnetBuf;
 };
 
 // Global instance — include this header and use Log.printf() / Log.println()

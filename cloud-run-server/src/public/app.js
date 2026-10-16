@@ -5,20 +5,36 @@ let PUBLIC_VAPID_KEY = '';
 // Array to store active PIR events locally
 let activePirEvents = [];
 let pirEnabled = false;
+// True while a PIR command has been sent to the server but not yet confirmed
+// by the ESP32 via SSE. During this time the lamp shows yellow.
+let pirSwitching = false;
 
 // Reflects the current PIR state in both the toggle button and the lamp.
 // Called from every place the state changes, so the two never disagree.
 function updatePirUi() {
     const button = document.getElementById('pirToggleBtn');
+    const lamp = document.getElementById('pirLamp');
+    const lampText = document.getElementById('pirLampText');
+
+    if (pirSwitching) {
+        if (lamp) {
+            lamp.classList.remove('is-enabled', 'is-disabled');
+            lamp.classList.add('is-switching');
+        }
+        if (lampText) lampText.textContent = 'PIR switching…';
+        if (button) button.disabled = true;
+        return;
+    }
+
     if (button) {
         button.textContent = pirEnabled ? 'Deactivate PIR' : 'Activate PIR';
         button.setAttribute('aria-pressed', String(pirEnabled));
+        button.disabled = false;
     }
 
     // Lamp: red when the PIR is enabled, green when it is disabled
-    const lamp = document.getElementById('pirLamp');
-    const lampText = document.getElementById('pirLampText');
     if (lamp) {
+        lamp.classList.remove('is-switching');
         lamp.classList.toggle('is-enabled', pirEnabled);
         lamp.classList.toggle('is-disabled', !pirEnabled);
     }
@@ -283,9 +299,12 @@ eventSource.onmessage = (event) => {
     // Update latest readings box
     updateLatestReadings(data);
 
-    // Sync PIR button with Firestore-confirmed state from server
+    // Sync PIR lamp with ESP32-confirmed state. This is the only place that
+    // resolves the yellow "switching" state — the lamp turns green/red only
+    // when the device has actually applied the command.
     if (typeof data.pir_enabled === 'boolean') {
         pirEnabled = data.pir_enabled;
+        pirSwitching = false;
         updatePirUi();
     }
 
@@ -355,14 +374,15 @@ document.getElementById('pirToggleBtn').addEventListener('click', async (event) 
         });
         if (!response.ok) throw new Error(`PIR update failed: ${response.status}`);
 
-        pirEnabled = nextState;
+        // Command stored on server — wait for ESP32 to confirm via SSE before
+        // showing the final colour. Keep button disabled during the wait.
+        pirSwitching = true;
         updatePirUi();
         document.getElementById('statusText').innerText =
-            `PIR ${pirEnabled ? 'activation' : 'deactivation'} requested. Waiting for device...`;
+            `PIR ${nextState ? 'activation' : 'deactivation'} requested. Waiting for device…`;
     } catch (error) {
         console.error('PIR update error:', error);
         alert('Failed to update PIR state.');
-    } finally {
         button.disabled = false;
     }
 });

@@ -591,17 +591,21 @@ Or open [Cloud Logging in the console](https://console.cloud.google.com/logs).
 Now that the server is deployed, update `esp32-sensor/config.h`:
 
 ```cpp
-// Remove the "https://" prefix — only the hostname goes here
-#define SERVER_HOST "home-check-server-xxxx-uc.a.run.app"
-#define SERVER_PORT 443
-#define SERVER_PATH "/api/data"
+// Remote server (GPIO19 floating/HIGH) — remove the "https://" prefix
+#define SERVER_HOST_REMOTE  "home-check-server-xxxx-uc.a.run.app"
+#define SERVER_PORT_REMOTE  443
+#define SERVER_PATH         "/api/data"
 ```
 
-And update `esp32-sensor/secrets.h` with:
-- The same `HMAC_SECRET_KEY` value you stored in Secret Manager
-- The root CA certificate extracted from the Cloud Run TLS chain (see the [Hardware Setup Guide](./01-hardware-setup.md#step-2--create-secretsh))
+And update `esp32-sensor/secrets.h` with the same `HMAC_SECRET_KEY` value you stored in Secret Manager:
 
-Then reflash the ESP32 and check the Serial Monitor for `POST Result Code: 200`.
+```cpp
+#define HMAC_SECRET "your-64-char-hex-secret"
+```
+
+> **No root CA certificate needed.** The firmware uses the ESP32 built-in Mozilla root CA bundle and verifies the Cloud Run TLS certificate automatically, exactly like a browser.
+
+Then reflash the ESP32 and check the Serial Monitor for `POST Result Code: 200`. You can also trigger an immediate report without waiting 30 minutes by typing `send` in the Serial Monitor or Telnet session.
 
 ---
 

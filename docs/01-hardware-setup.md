@@ -20,7 +20,8 @@
 10. [Configuring the Sketch](#configuring-the-sketch)
 11. [Flashing the ESP32](#flashing-the-esp32)
 12. [Reading the Serial Monitor](#reading-the-serial-monitor)
-13. [Troubleshooting](#troubleshooting)
+13. [Serial / Telnet Commands](#serial--telnet-commands)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -256,7 +257,9 @@ GPIO19 selects whether the ESP32 sends data to the **remote Cloud Run server** (
 | GPIO19 State | Server Target | Protocol |
 |---|---|---|
 | **Floating / HIGH** (default) | Remote Cloud Run | HTTPS (port 443) |
-| **Tied to GND** | Local dev server | HTTP (port 8080) |
+| **Tied to GND** | Local dev server | HTTPS (port 8080) |
+
+> **Note**: The firmware always uses HTTPS regardless of mode. The local mode target (`SERVER_HOST_LOCAL` / `SERVER_PORT_LOCAL`) must therefore also serve TLS. For a plain-HTTP local server, see security audit finding I4.
 
 To switch to local mode, connect GPIO19 to GND with a jumper wire or a simple toggle switch. Remove the jumper (or flip the switch) to return to remote mode. The pin is read once at boot, so **you must reset the ESP32** after changing the jumper for it to take effect.
 
@@ -613,28 +616,12 @@ Generate a secure random secret on your computer:
 openssl rand -hex 32
 ```
 
-**Root CA Certificate** — needed so the ESP32 can verify the Cloud Run TLS certificate:
-
-```bash
-# Run this after your Cloud Run service is deployed (you need the URL first)
-openssl s_client -connect YOUR_CLOUD_RUN_HOST.run.app:443 -showcerts 2>/dev/null \
-  | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' \
-  | tail -n +$(awk '/BEGIN CERTIFICATE/{n++} n==2{print NR; exit}' \
-      <(openssl s_client -connect YOUR_CLOUD_RUN_HOST.run.app:443 -showcerts 2>/dev/null))
-```
-
-A simpler alternative — open Chrome, navigate to your Cloud Run URL, click the 🔒 padlock → **Connection is secure → Certificate is valid → Details**. Export the **root certificate** (the top item in the chain) as PEM and paste it into `secrets.h`:
-
+**OTA Password** — protects wireless firmware updates; change the placeholder before deploying:
 ```cpp
-static const char ROOT_CA_CERT[] PROGMEM = R"EOF(
------BEGIN CERTIFICATE-----
-MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
-... (your full root CA cert here) ...
------END CERTIFICATE-----
-)EOF";
+#define OTA_PASSWORD "choose-a-strong-ota-password"
 ```
 
-> **For Google Cloud Run**, the root CA is typically **"GTS Root R1"** or **"GlobalSign Root CA"**. You can also download it from [pki.goog](https://pki.goog/).
+> **TLS / Root CA certificate**: No manual certificate is needed. The firmware uses the **ESP32 built-in Mozilla root CA bundle** (shipped with the Arduino core, ~130 trusted roots). It works with Google Cloud Run out of the box, survives certificate rotations automatically, and behaves exactly like a browser. There is no `ROOT_CA_CERT` to configure.
 
 ---
 
@@ -697,6 +684,14 @@ Open `config.h` and change the placeholder:
 
 Open **Tools → Serial Monitor** (or press `Ctrl+Shift+M`). Set baud rate to **115200**.
 
+After the first flash, the ESP32 also starts a **Telnet log server** (port 23) once WiFi connects. You can follow the same output over the network without a USB cable:
+
+```bash
+telnet <ESP32-IP> 23
+```
+
+The IP address is printed on the Serial Monitor at boot: `[WIFI] IP address: 192.168.x.x`. Only one Telnet session is allowed at a time.
+
 You should see output like:
 
 ```
@@ -732,6 +727,7 @@ You should see output like:
 | `[PIR]` | PIR monitoring toggle, motion events, remote command polling |
 | `[HTTP]` | HTTP/HTTPS POST, response code, PIR command polling |
 | `[OTA]` | OTA server ready, update progress, errors |
+| `[CMD]` | Serial or Telnet command received and executed |
 
 ### Common Serial Monitor Errors
 
@@ -744,9 +740,41 @@ You should see output like:
 | `[WIFI] Failed after 20s, status 1 (SSID not found...)` | Wrong SSID, or the network is 5 GHz-only | The ESP32 is 2.4 GHz only; check `WIFI_SSID` and that the band is enabled |
 | `[WIFI] Failed after 20s, status 4 (connection refused...)` | Wrong password | Check `WIFI_PASSWORD` in `config.h` |
 | `[WIFI] Failed after 20s, status 6 (disconnected...)` | Router not answering, or weak signal | Move the node closer; check the router is up |
-| `[HTTP] Unable to connect to server` | Wrong `SERVER_HOST` or TLS cert issue | Verify `config.h`; check `ROOT_CA_CERT` |
+| `[HTTP] Unable to connect to server` | Wrong hostname, NTP not synced, or local server not running HTTPS | Verify `SERVER_HOST_REMOTE` / `SERVER_HOST_LOCAL` in `config.h`; ensure time is synced |
 | `POST Result Code: 401` | Wrong HMAC secret | Ensure `HMAC_SECRET` matches server `HMAC_SECRET_KEY` |
 | `POST Result Code: 400` | Payload validation failed | Check ArduinoJson v6 is installed |
+
+---
+
+## Serial / Telnet Commands
+
+While the ESP32 is running you can type commands into the **Serial Monitor** or into a **Telnet session** (`telnet <IP> 23`). Commands are case-insensitive; press Enter to send.
+
+| Command | Effect |
+|---|---|
+| `send` | Forces an immediate sensor sample and sends the data report to the server, exactly like pressing the physical button on GPIO13. Resets the scheduled-report timer so the next automatic report is 30 minutes later. |
+| `read` | Prints the latest sensor readings (temperature, humidity, light, TVOC if available) and the current alarm state without sending anything to the server. |
+| `arm` | Enables PIR motion monitoring (arms the alarm). Equivalent to toggling the physical button on GPIO27 from disarmed to armed. Updates `pirUpdatedAt` so the server will recognise the change on the next data POST or PIR command poll. |
+
+Example session output:
+
+```
+> send
+[CMD] 'send' received — triggering report...
+[SENSOR] Taking environmental sample...
+[SENSOR] Temp: 24.1°C | Humidity: 51.3% | Light: 2980 | TVOC: 87 ppb
+[HTTP] Preparing report...
+[HTTP] POST Result Code: 200
+[HTTP] Report sent successfully.
+
+> read
+[CMD] Temp: 24.1°C  Humidity: 51.3%  Light: 2980  TVOC: 87 ppb  PIR: disarmed
+
+> arm
+[CMD] Alarm armed (ts 1760684400)
+```
+
+> The `disarm` command is intentionally not available over Serial/Telnet for security reasons. Use the dashboard to disarm remotely, or the physical toggle button on GPIO27 to disarm locally.
 
 ---
 
@@ -791,9 +819,11 @@ payload instead, and the dashboard shows `--`.
 
 ### TLS certificate verification fails
 
-- The `ROOT_CA_CERT` in `secrets.h` doesn't match the actual root CA for your Cloud Run URL.
-- Use `openssl s_client` (see [Step 2](#step-2--create-secretsh)) to extract the correct cert.
-- Alternatively, call `client->setInsecure()` **only during development** — remove it before production.
+The firmware uses the ESP32 built-in Mozilla root CA bundle — no manual certificate configuration is needed or possible. If TLS fails, the causes are almost always:
+
+- **Wrong hostname**: `SERVER_HOST_REMOTE` must be the bare hostname without `https://` (e.g. `home-check-server-xxxx-uc.a.run.app`).
+- **Local dev mode on a plain-HTTP server**: the firmware always connects with HTTPS. A local server reachable only via plain HTTP will time out at the TLS handshake (see security audit I4).
+- **Clock not synced**: the TLS handshake requires a valid time. If `[WIFI] Time synchronized successfully.` does not appear, wait for the NTP retry or check internet connectivity.
 
 ---
 

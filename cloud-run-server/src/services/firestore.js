@@ -225,31 +225,6 @@ module.exports = {
             .slice(0, 10);
     },
 
-    // Function to delete readings older than 30 days (1 month)
-    // Run periodically to keep Firestore storage thin and free-tier compliant
-    async deleteOldReadings() {
-        // Calculate timestamp for 30 days ago in UNIX epoch seconds
-        const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
-
-        // Fetch documents older than 30 days
-        const snapshot = await db.collection('readings')
-            .where('timestamp', '<', thirtyDaysAgo)
-            .get();
-
-        if (snapshot.empty) {
-            return;
-        }
-
-        // Delete documents using a batch (Firestore allows up to 500 writes per batch)
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-
-        await batch.commit();
-        console.log(`Pruned ${snapshot.size} readings older than 30 days.`);
-    },
-
     // Function to delete readings older than 48 hours
     // Run when the watchdog fires to keep only the dashboard retention window
     async deleteReadingsOlderThan48Hours() {

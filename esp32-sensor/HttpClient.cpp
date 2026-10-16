@@ -144,7 +144,6 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
 
     HTTPClient http;
     WiFiClientSecure *secureClient = nullptr;
-    WiFiClient *plainClient = nullptr;
     bool begun = false;
 
     secureClient = new WiFiClientSecure;
@@ -176,7 +175,6 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     {
         Log.println("[HTTP] Unable to connect to server");
         delete secureClient;
-        delete plainClient;
         return false;
     }
 
@@ -213,7 +211,6 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
 
     http.end();
     delete secureClient;
-    delete plainClient;
     return success;
 }
 
