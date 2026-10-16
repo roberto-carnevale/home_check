@@ -3,6 +3,7 @@
 // Uses WiFiClientSecure for TLS and mbedTLS for hashing/signing.
 
 #include "HttpClient.h"
+#include "TelnetLogger.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h> // ESP32 HTTP client library
@@ -115,7 +116,7 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     const size_t bodyLength = jsonBody.length();
     if (bodyLength == 0)
     {
-        Serial.println("[HTTP] Empty payload, skipping request");
+        Log.println("[HTTP] Empty payload, skipping request");
         return false;
     }
 
@@ -126,20 +127,20 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     // Compute final signature
     String signature = computeSignature(tsStr, bodyHash);
 
-    Serial.print("[HTTP] Target: ");
-    Serial.print(_host);
-    Serial.print(":");
-    Serial.print(_port);
-    Serial.println(_path);
+    Log.print("[HTTP] Target: ");
+    Log.print(_host);
+    Log.print(":");
+    Log.print(_port);
+    Log.println(_path);
 
     IPAddress resolvedIp;
     if (!WiFi.hostByName(_host, resolvedIp))
     {
-        Serial.println("[HTTP] DNS resolution failed for target host");
+        Log.println("[HTTP] DNS resolution failed for target host");
         return false;
     }
-    Serial.print("[HTTP] Resolved host to: ");
-    Serial.println(resolvedIp);
+    Log.print("[HTTP] Resolved host to: ");
+    Log.println(resolvedIp);
 
     HTTPClient http;
     WiFiClientSecure *secureClient = nullptr;
@@ -149,7 +150,7 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     secureClient = new WiFiClientSecure;
     if (!secureClient)
     {
-        Serial.println("[HTTP] Unable to create secure client");
+        Log.println("[HTTP] Unable to create secure client");
         return false;
     }
     secureClient->setHandshakeTimeout(30);
@@ -166,14 +167,14 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     }
 
     String url = String("https://") + _host + ":" + String(_port) + _path;
-    Serial.print("Connecting to: ");
-    Serial.println(url);
+    Log.print("Connecting to: ");
+    Log.println(url);
     begun = http.begin(*secureClient, url);
 
 
     if (!begun)
     {
-        Serial.println("[HTTP] Unable to connect to server");
+        Log.println("[HTTP] Unable to connect to server");
         delete secureClient;
         delete plainClient;
         return false;
@@ -186,16 +187,16 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     http.setTimeout(15000);
     http.setReuse(false);
 
-    Serial.print("[HTTP] Body length: ");
-    Serial.println(bodyLength);
+    Log.print("[HTTP] Body length: ");
+    Log.println(bodyLength);
 
     int httpCode = http.POST(jsonBody);
-    Serial.print("[HTTP] POST Result Code: ");
-    Serial.println(httpCode);
+    Log.print("[HTTP] POST Result Code: ");
+    Log.println(httpCode);
     if (httpCode < 0)
     {
-        Serial.print("[HTTP] POST error: ");
-        Serial.println(http.errorToString(httpCode));
+        Log.print("[HTTP] POST error: ");
+        Log.println(http.errorToString(httpCode));
     }
 
     bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED);
@@ -206,8 +207,8 @@ bool HttpClient::postJson(const String &jsonBody, unsigned long timestampUnix, S
     else if (httpCode >= 0)
     {
         String payload = http.getString();
-        Serial.print("[HTTP] Error payload: ");
-        Serial.println(payload);
+        Log.print("[HTTP] Error payload: ");
+        Log.println(payload);
     }
 
     http.end();
@@ -224,7 +225,7 @@ bool HttpClient::getPirCommand(bool &enabled, unsigned long &updatedAt, unsigned
     IPAddress resolvedIp;
     if (!WiFi.hostByName(_host, resolvedIp))
     {
-        Serial.println("[HTTP] DNS resolution failed while polling PIR command");
+        Log.println("[HTTP] DNS resolution failed while polling PIR command");
         return false;
     }
 
@@ -244,7 +245,7 @@ bool HttpClient::getPirCommand(bool &enabled, unsigned long &updatedAt, unsigned
     String url = String("https://") + _host + ":" + String(_port) + commandPath;
     if (!http.begin(secureClient, url))
     {
-        Serial.println("[HTTP] Unable to connect while polling PIR command");
+        Log.println("[HTTP] Unable to connect while polling PIR command");
         return false;
     }
 

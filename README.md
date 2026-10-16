@@ -428,7 +428,7 @@ Configurable in `cloud-run-server/src/routes/data.js`:
 | Humidity | avg > **80 %** | Excessive moisture / mould risk |
 | Humidity | avg < **20 %** | Too dry |
 | Light (raw) | avg < **50** | Sustained darkness |
-| TVOC | avg > **450 ppb** | Poor air quality / VOC contamination |
+| TVOC | avg > **999 ppb** | Poor air quality / VOC contamination |
 | Motion | PIR triggered | Intrusion / unexpected movement |
 | Watchdog | No data for **95 min** | ESP32 offline / power loss |
 

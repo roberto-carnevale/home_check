@@ -57,7 +57,7 @@ Two independent components share an HMAC secret:
 
 ### Alert Thresholds
 
-Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity >80% or <20%, light <50 raw units, TVOC >450 ppb, plus motion detection.
+Defined in `src/routes/data.js` as `THRESHOLDS`: temp >35°C or <5°C, humidity >80% or <20%, light <50 raw units, TVOC >999 ppb, plus motion detection.
 
 ## Environment
 

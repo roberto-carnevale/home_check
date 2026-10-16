@@ -95,10 +95,16 @@ private:
     // Reads TVOC ppb value from the AGS02MA; returns -1 if the read failed
     int32_t readTvocPpb();
 
+    // Applies linear temperature/humidity compensation to a raw TVOC reading
+    float applyTvocCompensation(float rawTvoc, float temp, float humidity);
+
     // Prints every responding I2C address; wiring diagnostic used at boot
     void scanI2CBus();
 
     LastReading _last;     // Most recent sample, for the display
+
+    float _tvocEMA;        // Current EMA-smoothed compensated TVOC value
+    bool _tvocEMAReady;    // False until the first valid compensated reading
 
     uint8_t _headIndex;    // Current index to insert new sample
     uint8_t _count;        // Total number of valid samples stored

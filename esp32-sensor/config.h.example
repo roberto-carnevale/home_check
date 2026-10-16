@@ -57,6 +57,17 @@
 // sent while it is busy, so retry a few times before dropping the sample.
 #define TVOC_READ_ATTEMPTS   3
 #define TVOC_RETRY_DELAY_MS  1600
+// Environmental compensation for the AGS02MA MOX sensor.
+// The sensor drifts with temperature and humidity; these offsets correct for
+// that by subtracting a linear bias centred on the calibration baseline.
+// Tune TVOC_TEMP_COEFF / TVOC_RH_COEFF by logging raw vs compensated in
+// clean, stable air while deliberately varying temperature or humidity.
+#define TVOC_BASE_TEMP   22.0f  // °C at which the sensor baseline was established
+#define TVOC_BASE_RH     45.0f  // %RH at which the sensor baseline was established
+#define TVOC_TEMP_COEFF   3.2f  // ppb subtracted per °C above baseline
+#define TVOC_RH_COEFF     5.5f  // ppb subtracted per %RH above baseline
+// EMA smoothing applied after compensation (lower = smoother, higher = more reactive)
+#define TVOC_EMA_ALPHA    0.08f
 // Button to toggle PIR monitoring on/off at runtime (active low, internal pull-up)
 #define PIR_TOGGLE_PIN 27
 // LED indicator: lit when PIR monitoring is active

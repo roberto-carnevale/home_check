@@ -13,6 +13,7 @@ static const uint8_t CHAR_C      = SEG_A | SEG_D | SEG_E | SEG_F;    // C
 static const uint8_t CHAR_R      = SEG_E | SEG_G;                    // r
 static const uint8_t CHAR_H      = SEG_C | SEG_E | SEG_F | SEG_G;    // h
 static const uint8_t CHAR_B      = SEG_F | SEG_G | SEG_E | SEG_D | SEG_C;    // b
+static const uint8_t CHAR_N      = SEG_G | SEG_E | SEG_C;           // n
 static const uint8_t CHAR_L      = SEG_E | SEG_F;                    // l
 static const uint8_t CHAR_O      = SEG_C | SEG_D | SEG_E | SEG_G;    // o
 
@@ -156,9 +157,10 @@ void DisplayManager::renderAirQuality() {
     long value = lroundf(_tvoc);
 
     if (value > DISPLAY_TVOC_MAX_PPB) {
-        segments[0] = CHAR_L;
-        segments[1] = CHAR_O;
-        segments[2] = CHAR_BLANK;
+        segments[0] = _display.encodeDigit((value / 1000) % 10);
+        segments[1] = _display.encodeDigit((value / 100) % 10);
+        segments[2] = _display.encodeDigit((value / 10) % 10);
+        segments[3] = CHAR_N;
         _display.setSegments(segments);
         return;
     }

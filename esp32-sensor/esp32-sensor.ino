@@ -11,6 +11,7 @@
 
 // Include custom headers
 #include "config.h"
+#include "TelnetLogger.h"
 #include "SensorManager.h"
 #include "HttpClient.h"
 #include "DisplayManager.h"
@@ -78,8 +79,8 @@ bool connectWiFi() {
         return true;
     }
 
-    Serial.print("[WIFI] Connecting to ");
-    Serial.println(WIFI_SSID);
+    Log.print("[WIFI] Connecting to ");
+    Log.println(WIFI_SSID);
 
     // Force station mode and drop any stale association: the ESP32 keeps
     // credentials in NVS and can otherwise keep retrying an old one.
@@ -94,21 +95,21 @@ bool connectWiFi() {
     while (WiFi.status() != WL_CONNECTED &&
            millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
         delay(500);
-        Serial.print(".");
+        Log.print(".");
     }
-    Serial.println();
+    Log.println();
 
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.printf("[WIFI] Failed after %lus, status %d (%s)\n",
+        Log.printf("[WIFI] Failed after %lus, status %d (%s)\n",
                       WIFI_CONNECT_TIMEOUT_MS / 1000,
                       WiFi.status(), wifiStatusText(WiFi.status()));
         return false;
     }
 
     // Connection successful, print IP address
-    Serial.println("[WIFI] Connected.");
-    Serial.print("[WIFI] IP address: ");
-    Serial.println(WiFi.localIP());
+    Log.println("[WIFI] Connected.");
+    Log.print("[WIFI] IP address: ");
+    Log.println(WiFi.localIP());
     return true;
 }
 
@@ -116,7 +117,7 @@ bool connectWiFi() {
 // Returns true on success. The HMAC signature carries a timestamp the server
 // checks for freshness, so an unsynced clock makes every report be rejected.
 bool syncTime() {
-    Serial.println("[WIFI] Syncing time via NTP...");
+    Log.println("[WIFI] Syncing time via NTP...");
     // Configure time library with NTP server
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
@@ -124,10 +125,10 @@ bool syncTime() {
     struct tm timeinfo;
     // Wait until time is obtained
     if (!getLocalTime(&timeinfo)) {
-        Serial.println("[WIFI] Failed to obtain time");
+        Log.println("[WIFI] Failed to obtain time");
         return false;
     }
-    Serial.println("[WIFI] Time synchronized successfully.");
+    Log.println("[WIFI] Time synchronized successfully.");
     return true;
 }
 
@@ -142,7 +143,7 @@ unsigned long getTimestamp() {
 // Helper function to bundle, sign and send the sensor report
 void sendReport(unsigned long ts) {
     if (sensorMgr->hasEnoughData()) {
-        Serial.println("[HTTP] Preparing report...");
+        Log.println("[HTTP] Preparing report...");
         
         // Get aggregated statistics
         AllStats stats = sensorMgr->getStats();
@@ -161,7 +162,7 @@ void sendReport(unsigned long ts) {
         bool motionFlag = sensorMgr->isMotionDetected();
         doc["motion_detected"] = motionFlag;
         if (motionFlag) {
-            Serial.printf("[PIR] Motion event reported for device %s at timestamp %lu\n", DEVICE_ID, ts);
+            Log.printf("[PIR] Motion event reported for device %s at timestamp %lu\n", DEVICE_ID, ts);
         }
 
         // Report current local alarm state AND the Unix timestamp of the last
@@ -203,12 +204,12 @@ void sendReport(unsigned long ts) {
         String jsonBody;
         serializeJson(doc, jsonBody);
         
-        Serial.print("[HTTP] Payload: ");
-        Serial.println(jsonBody);
+        Log.print("[HTTP] Payload: ");
+        Log.println(jsonBody);
 
         String responseBody;
         if (httpClient->postJson(jsonBody, ts, responseBody)) {
-            Serial.println("[HTTP] Report sent successfully.");
+            Log.println("[HTTP] Report sent successfully.");
             sensorMgr->clearMotionFlag(); // Reset the sticky flag
 
             // If the server detected a state divergence it piggybacks a
@@ -233,15 +234,15 @@ void sendReport(unsigned long ts) {
                         lastPirPresenceMs = 0;
                         displayMgr->setActive(false);
                     }
-                    Serial.printf("[PIR] State synced via data response: %s\n",
+                    Log.printf("[PIR] State synced via data response: %s\n",
                                   pirEnabled ? "enabled" : "disabled");
                 }
             }
         } else {
-            Serial.println("[HTTP] Failed to send report.");
+            Log.println("[HTTP] Failed to send report.");
         }
     } else {
-        Serial.println("[HTTP] Not enough data to report.");
+        Log.println("[HTTP] Not enough data to report.");
     }
 }
 
@@ -253,34 +254,35 @@ void startOTA() {
 
     ArduinoOTA.onStart([]() {
         String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
-        Serial.println("[OTA] Starting update: " + type);
+        Log.println("[OTA] Starting update: " + type);
     });
     ArduinoOTA.onEnd([]() {
-        Serial.println("[OTA] Update complete — rebooting");
+        Log.println("[OTA] Update complete — rebooting");
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("[OTA] Progress: %u%%\r", progress / (total / 100));
+        Log.printf("[OTA] Progress: %u%%\r", progress / (total / 100));
     });
     ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("[OTA] Error[%u]: ", error);
-        if      (error == OTA_AUTH_ERROR)    Serial.println("Auth failed");
-        else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin failed");
-        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect failed");
-        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive failed");
-        else if (error == OTA_END_ERROR)     Serial.println("End failed");
+        Log.printf("[OTA] Error[%u]: ", error);
+        if      (error == OTA_AUTH_ERROR)    Log.println("Auth failed");
+        else if (error == OTA_BEGIN_ERROR)   Log.println("Begin failed");
+        else if (error == OTA_CONNECT_ERROR) Log.println("Connect failed");
+        else if (error == OTA_RECEIVE_ERROR) Log.println("Receive failed");
+        else if (error == OTA_END_ERROR)     Log.println("End failed");
     });
 
     ArduinoOTA.begin();
-    Serial.printf("[OTA] Ready — hostname: %s\n", OTA_HOSTNAME);
+    Log.printf("[OTA] Ready — hostname: %s\n", OTA_HOSTNAME);
+    Log.startServer();
 }
 
 // Standard Arduino setup function
 void setup() {
     // Initialize serial monitor for debugging
-    Serial.begin(115200);
+    Log.begin(115200);
     delay(1000); // Give serial time to stabilize
     
-    Serial.println("\n[SENSOR] Starting ESP32 Sensor Node...");
+    Log.println("\n[SENSOR] Starting ESP32 Sensor Node...");
 
     // Configure mode switch pin and read it first to select WiFi + server
     pinMode(MODE_SWITCH_PIN, INPUT_PULLUP);
@@ -295,20 +297,20 @@ void setup() {
         host = SERVER_HOST_REMOTE;
         port = SERVER_PORT_REMOTE;
         caCert = nullptr;  // use built-in CA bundle (like a browser)
-        Serial.println("[MODE] REMOTE server selected (GPIO19 HIGH)");
+        Log.println("[MODE] REMOTE server selected (GPIO19 HIGH)");
     } else {
         // Pin tied to GND → local development server
         host = SERVER_HOST_LOCAL;
         port = SERVER_PORT_LOCAL;
         caCert = nullptr;  // use built-in CA bundle
-        Serial.println("[MODE] LOCAL server selected (GPIO19 GND)");
+        Log.println("[MODE] LOCAL server selected (GPIO19 GND)");
     }
 
-    Serial.print("[HTTP] Target: ");
-    Serial.print(host);
-    Serial.print(":");
-    Serial.print(port);
-    Serial.println(SERVER_PATH);
+    Log.print("[HTTP] Target: ");
+    Log.print(host);
+    Log.print(":");
+    Log.print(port);
+    Log.println(SERVER_PATH);
 
     // Connect to the selected WiFi network. A failure here is not fatal:
     // loop() keeps retrying, and the sensors work regardless.
@@ -318,7 +320,7 @@ void setup() {
         // Start OTA server so firmware can be pushed from Arduino IDE over WiFi
         startOTA();
     } else {
-        Serial.println("[WIFI] Continuing offline; will retry in the main loop.");
+        Log.println("[WIFI] Continuing offline; will retry in the main loop.");
     }
     lastWifiAttemptTime = millis();
     lastTimeSyncAttempt = lastWifiAttemptTime;
@@ -351,6 +353,7 @@ void loop() {
     // so the IDE can push a new firmware image at any time.
     if (WiFi.status() == WL_CONNECTED) {
         ArduinoOTA.handle();
+        Log.handle();
     }
 
     // Reconnect to WiFi if the link is down, but no more often than
@@ -359,7 +362,7 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED &&
         currentMillis - lastWifiAttemptTime >= WIFI_RETRY_INTERVAL_MS) {
         lastWifiAttemptTime = currentMillis;
-        Serial.println("[WIFI] Connection lost. Reconnecting...");
+        Log.println("[WIFI] Connection lost. Reconnecting...");
         if (connectWiFi()) {
             // The clock is lost across a long outage, so resync before the
             // next report rather than signing it with a stale timestamp.
@@ -381,18 +384,18 @@ void loop() {
     // Check if it's time to take a new environmental sensor sample
     if (currentMillis - lastSampleTime >= SAMPLE_INTERVAL_MS || lastSampleTime == 0) {
         lastSampleTime = currentMillis;
-        Serial.println("[SENSOR] Taking environmental sample...");
+        Log.println("[SENSOR] Taking environmental sample...");
         
         // Read from DHT and LDR and store in circular buffer
         if (sensorMgr->takeSample()) {
-            Serial.println("[SENSOR] Environmental sample successful.");
+            Log.println("[SENSOR] Environmental sample successful.");
 
             // Push the fresh values to the display
             LastReading latest = sensorMgr->getLastReading();
             displayMgr->setReadings(latest.temp, latest.humidity,
                                     latest.tvoc, latest.tvoc >= 0.0f);
         } else {
-            Serial.println("[SENSOR] Environmental sample failed.");
+            Log.println("[SENSOR] Environmental sample failed.");
         }
     }
 
@@ -406,7 +409,7 @@ void loop() {
         lastToggleButtonPressTime = currentMillis;
         pirEnabled = !pirEnabled;
         pirUpdatedAt = getTimestamp();
-        Serial.printf("[PIR] Monitoring %s (physical toggle at %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
+        Log.printf("[PIR] Monitoring %s (physical toggle at %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
         if (!pirEnabled) {
             digitalWrite(PIR_LED_PIN, LOW);
         } else {
@@ -429,7 +432,7 @@ void loop() {
             pirEnabled = requestedPirState;
             pirUpdatedAt = requestedPirTs;
             digitalWrite(PIR_LED_PIN, pirEnabled ? HIGH : LOW);
-            Serial.printf("[PIR] Remote monitoring %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
+            Log.printf("[PIR] Remote monitoring %s (ts %lu)\n", pirEnabled ? "enabled" : "disabled", pirUpdatedAt);
             if (!pirEnabled) {
                 sensorMgr->clearMotionFlag();
             } else {
@@ -462,7 +465,7 @@ void loop() {
         // Alarm trigger: only when the system is armed
         if (pirEnabled && pirPresence &&
             (lastPirReportTime == 0 || currentMillis - lastPirReportTime >= PIR_REPORT_COOLDOWN_MS)) {
-            Serial.println("[PIR] Triggering immediate report due to active motion.");
+            Log.println("[PIR] Triggering immediate report due to active motion.");
             lastPirReportTime = currentMillis;
             unsigned long ts = getTimestamp();
             sendReport(ts);
@@ -476,7 +479,7 @@ void loop() {
     if (currentMillis - lastButtonPressTime >= BUTTON_LOCKOUT_MS) {
         // Detect falling edge (transition from HIGH to LOW)
         if (buttonState == LOW && lastButtonState == HIGH) {
-            Serial.println("[SENSOR] Manual test button pressed! Triggering report...");
+            Log.println("[SENSOR] Manual test button pressed! Triggering report...");
             
             // Record current time to initiate the 2-second standby lockout
             lastButtonPressTime = currentMillis;

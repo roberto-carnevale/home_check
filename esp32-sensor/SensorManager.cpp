@@ -3,6 +3,7 @@
 // Handles reading from hardware and computing statistics over a circular buffer.
 
 #include "SensorManager.h"
+#include "TelnetLogger.h"
 #include "config.h"
 
 // Constructor implementation
@@ -11,7 +12,8 @@ SensorManager::SensorManager(uint8_t dhtPin, uint8_t ldrPin, uint8_t pirPin, uin
     : _dhtPin(dhtPin), _ldrPin(ldrPin), _pirPin(pirPin), _tvocAddr(tvocAddr), _windowSize(windowSize),
       _dht(dhtPin, DHT_TYPE), _tvocReady(false),
       _last{0.0f, 0.0f, 0.0f, -1.0f, false},
-      _headIndex(0), _count(0), _motionDetected(false) {
+      _headIndex(0), _count(0), _motionDetected(false),
+      _tvocEMA(0.0f), _tvocEMAReady(false) {
 
     // Allocate memory for temperature samples
     _tempBuffer = new float[_windowSize];
@@ -59,7 +61,7 @@ void SensorManager::begin() {
     // speed, the inter-command delays and the CRC checking.
     _tvocReady = _ags.begin(&Wire, _tvocAddr);
     if (!_tvocReady) {
-        Serial.printf("[TVOC] AGS02MA init FAILED at 0x%02X (check SDA=%d, SCL=%d, power)\n",
+        Log.printf("[TVOC] AGS02MA init FAILED at 0x%02X (check SDA=%d, SCL=%d, power)\n",
                       _tvocAddr, TVOC_SDA_PIN, TVOC_SCL_PIN);
         // Scan the whole bus: this separates "nothing is wired up" (no devices
         // at all -> power or SDA/SCL problem) from "the sensor is there but at
@@ -71,12 +73,12 @@ void SensorManager::begin() {
         // command/response cycle and is the check that actually catches it.
         uint32_t fw = _ags.getFirmwareVersion();
         if (fw == 0) {
-            Serial.printf("[TVOC] AGS02MA answers at 0x%02X but register reads fail "
+            Log.printf("[TVOC] AGS02MA answers at 0x%02X but register reads fail "
                           "(firmware version 0)\n", _tvocAddr);
-            Serial.println("[TVOC] Wiring fault, not a config one: verify GND goes to "
+            Log.println("[TVOC] Wiring fault, not a config one: verify GND goes to "
                            "GND and VCC to 3.3V, then check the 10k pull-ups on SDA/SCL.");
         } else {
-            Serial.printf("[TVOC] AGS02MA initialised at 0x%02X, firmware 0x%08X\n",
+            Log.printf("[TVOC] AGS02MA initialised at 0x%02X, firmware 0x%08X\n",
                           _tvocAddr, (unsigned)fw);
         }
     }
@@ -98,7 +100,7 @@ bool SensorManager::takeSample() {
     // Check if DHT readings are valid numbers (not NaN)
     if (isnan(h) || isnan(t)) {
         // Log failure if DHT read failed
-        Serial.println("[SENSOR] Failed to read from DHT sensor!");
+        Log.println("[SENSOR] Failed to read from DHT sensor!");
         return false;
     }
 
@@ -106,7 +108,19 @@ bool SensorManager::takeSample() {
     // getStats() can skip it: reporting 0 ppb would look like perfectly clean
     // air and hide the fault.
     int32_t tvocRaw = readTvocPpb();
-    float tvoc = (tvocRaw >= 0) ? (float)tvocRaw : -1.0f;
+    float tvoc = -1.0f;
+    if (tvocRaw >= 0) {
+        // Apply linear T/RH compensation, then smooth with an EMA so that
+        // rapid climate swings do not cause spurious TVOC spikes.
+        float compensated = applyTvocCompensation((float)tvocRaw, t, h);
+        if (!_tvocEMAReady) {
+            _tvocEMA = compensated;
+            _tvocEMAReady = true;
+        } else {
+            _tvocEMA = (TVOC_EMA_ALPHA * compensated) + ((1.0f - TVOC_EMA_ALPHA) * _tvocEMA);
+        }
+        tvoc = _tvocEMA;
+    }
 
     // Insert new data at the current head index
     _tempBuffer[_headIndex] = t;
@@ -127,10 +141,10 @@ bool SensorManager::takeSample() {
 
     // Print sampled values to Serial Monitor
     if (tvoc >= 0.0f) {
-        Serial.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f | TVOC: %.0f ppb\n",
+        Log.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f | TVOC: %.0f ppb\n",
                       t, h, l, tvoc);
     } else {
-        Serial.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f | TVOC: n/a\n",
+        Log.printf("[SENSOR] Temp: %.1f°C | Humidity: %.1f%% | Light: %.0f | TVOC: n/a\n",
                       t, h, l);
     }
 
@@ -146,7 +160,7 @@ bool SensorManager::takePirSample() {
     // If PIR pin reads HIGH, motion is detected. Keep it sticky until reported.
     if (pirState == HIGH) {
         _motionDetected = true;
-        Serial.println("[SENSOR] Motion detected!");
+        Log.println("[SENSOR] Motion detected!");
         return true;
     }
 
@@ -251,25 +265,41 @@ AllStats SensorManager::getStats() const {
 // Scans the I2C bus and prints every address that ACKs.
 // Only called when the AGS02MA fails to answer, as a wiring diagnostic.
 void SensorManager::scanI2CBus() {
-    Serial.println("[TVOC] Scanning I2C bus...");
+    Log.println("[TVOC] Scanning I2C bus...");
     uint8_t found = 0;
 
     // 0x00-0x07 and 0x78-0x7F are reserved addresses, so skip them
     for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
-            Serial.printf("[TVOC]   device found at 0x%02X\n", addr);
+            Log.printf("[TVOC]   device found at 0x%02X\n", addr);
             found++;
         }
     }
 
     if (found == 0) {
-        Serial.println("[TVOC]   no I2C devices at all: check 3.3V, GND, "
+        Log.println("[TVOC]   no I2C devices at all: check 3.3V, GND, "
                        "SDA/SCL not swapped, and the 10k pull-ups to 3.3V");
     } else {
-        Serial.printf("[TVOC]   %u device(s) on the bus but none at 0x%02X: "
+        Log.printf("[TVOC]   %u device(s) on the bus but none at 0x%02X: "
                       "update AGS02MA_ADDR in config.h\n", found, _tvocAddr);
     }
+}
+
+// Applies linear temperature/humidity bias correction to a raw TVOC reading.
+// The AGS02MA is a MOX sensor whose oxide surface reacts differently at
+// different temperatures and humidity levels, causing apparent spikes when
+// either changes rapidly. Subtracting a linear offset centred on the
+// calibration baseline (TVOC_BASE_TEMP / TVOC_BASE_RH) reduces that drift.
+// Coefficients default to TVOC_TEMP_COEFF and TVOC_RH_COEFF from config.h;
+// tune them by logging rawTVOC vs compensated in a stable-air environment
+// while deliberately varying temperature or humidity.
+float SensorManager::applyTvocCompensation(float rawTvoc, float temp, float humidity) {
+    float tempOffset = temp     - TVOC_BASE_TEMP;
+    float rhOffset   = humidity - TVOC_BASE_RH;
+    float corrected  = rawTvoc - (tempOffset * TVOC_TEMP_COEFF)
+                               - (rhOffset   * TVOC_RH_COEFF);
+    return corrected < 0.0f ? 0.0f : corrected;
 }
 
 // Reads TVOC concentration in ppb from the AGS02MA.
@@ -300,6 +330,6 @@ int32_t SensorManager::readTvocPpb() {
         }
     }
 
-    Serial.printf("[TVOC] No valid reading after %d attempts\n", TVOC_READ_ATTEMPTS);
+    Log.printf("[TVOC] No valid reading after %d attempts\n", TVOC_READ_ATTEMPTS);
     return -1;
 }
